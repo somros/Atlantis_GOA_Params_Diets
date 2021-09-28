@@ -1,0 +1,259 @@
+---
+title: "Exploring GOA diet data"
+author: "Alberto Rovellini"
+date: "6/8/2021"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+# Purpose
+
+A look at the diet data for the GOA available for download from the [REEM](https://apps-afsc.fisheries.noaa.gov/refm/reem/webdietdata/dietdataintro.php) webpage. Data for "All species" for the Gulf of Alaska was downloaded. A data description is available [here](https://archive.fisheries.noaa.gov/afsc/refm/reem/data/DBDescription_WebData.pdf). 
+
+There is information on the % weight, numbers, and frequency of occurrence for prey [here](https://apps-afsc.fisheries.noaa.gov/refm/reem/webdietdata/diettableintro.php). This will be good to double-check.
+
+Do this by Atlantis group instead of predator and prey.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,include=FALSE}
+library(tidyverse)
+library(viridis)
+library(kableExtra)
+library(data.table)
+```
+
+```{r}
+select <- dplyr::select
+```
+
+# Import data
+
+How many predators do we have information for? And how many prey species?
+```{r}
+stomach <- read.csv("data/1_Gulf Of Alaska_RawPP.csv")
+
+stomach %>% select(Pred_name) %>% distinct() %>% pull()
+stomach %>% select(Prey_Name) %>% distinct() %>% pull()
+
+load("data/nodc_matching_key.Rdata")
+```
+
+We have 81 predators, and prey species are aggregated into 90 groups. 
+
+Let's rearrange things into Atlantis groups, instead of species.
+```{r}
+stomach <- stomach %>% left_join(nodc_matching_key %>% 
+                                   select(Nodc,Atlantis.group,Name.y) %>% 
+                                   set_names(c("Pred_nodc","Pred_at_code","Pred_at_name")), 
+                                 by = "Pred_nodc")
+# add prey now
+stomach <- stomach %>% left_join(nodc_matching_key %>% 
+                                   select(Nodc,Atlantis.group,Name.y) %>% 
+                                   set_names(c("Prey_nodc","Prey_at_code","Prey_at_name")), 
+                                 by = "Prey_nodc")
+
+# NAs in the Prey_at_code and Prey_at_name columns indicate empty stomachs or prey that was not identified to a level sufficient to attribute it to an Atlantis group (e.g. "Misc. teleost"). Drop these occurrences.
+
+stomach <- stomach %>% filter(!is.na(Prey_at_code))
+```
+
+Next, for each individual predator, we need to add up the ingested prey that is different species but the same Atlantis group. For instance, if a cod ate two species of Calanus, each with a NODC, these will need to be aggregated to "Large zooplankton".
+```{r}
+stomach <- stomach %>% group_by(Year,Hauljoin,Pred_at_code,Pred_at_name,Pred_nodc,Pred_specn,Rlat,Rlong,Prey_at_code,Prey_at_name) %>%
+  summarise(Prey_count = sum(Prey_cnt), Prey_weight = sum(Prey_twt)) %>% ungroup()
+```
+
+# Weight proportion in predator stomach
+
+Let's start with one species, ATF for consistency.
+```{r}
+stomach_atf <- stomach %>% filter(Pred_at_name == "Pollock")
+
+glimpse(stomach_atf)
+```
+
+Let's explore the data. Useful things to know would be:
+
+1. For a predator, how much a given prey occurs in the diet per year. Do this by calculating the proportion (weight, numbers of items, and occurrence) for each individual and by taking an average of all individuals. Do this for each year.
+2. Same as 1, but split the predator into juveniles and adults with L50%. 
+3. Take this one step further and split the prey into jubveniles and adults based on L50%, where possible.
+4. Work out averages of these for all years (actually, from 1990 onwards; and perhaps only for the 90's).
+
+We do this at haul level. We characterise the diet of the predator at the location of a haul by adding up the total ingested biomass of everything, and then by working out the proportion of that. When we take averages between hauls we will need to include "zero occurrences" of all preys that are absent from the stomachs in a certain haul. This appears to be the method they used [here](https://apps-afsc.fisheries.noaa.gov/refm/reem/webdietdata/diettableintro.php).
+
+```{r}
+diet_by_haul <- stomach_atf %>% 
+  group_by(Year, Hauljoin) %>%
+  mutate(Total_ingested = sum(Prey_weight)) %>%
+  ungroup() %>%
+  group_by(Year, Hauljoin, Prey_at_name) %>%
+  summarise(Prop_weight = sum(Prey_weight)/Total_ingested) %>%
+  distinct() %>%
+  ungroup()
+
+# need to add zeroes of all species that do not appear in a haul as prey for this predator. Then we can take means of all hauls.
+all_prey <- diet_by_haul %>% select(Prey_at_name) %>% distinct() %>% pull()
+all_hauls <- diet_by_haul %>% select(Hauljoin) %>% distinct() %>% pull()
+
+add_missing_prey <- function(hauljoin){
+  this_haul <- diet_by_haul %>% filter(Hauljoin == hauljoin)
+  missing_prey <- data.frame("Prey_at_name" = setdiff(all_prey, this_haul$Prey_at_name))
+  missing_prey_frame <- missing_prey %>% mutate(Year = this_haul$Year[1], Hauljoin = this_haul$Hauljoin[1], Prop_weight = 0) %>% select(Year,Hauljoin,Prey_at_name,Prop_weight)
+  haul_frame <- rbind(this_haul,missing_prey_frame)
+  return(haul_frame)
+}
+
+diet_by_haul_list <- purrr::map(all_hauls,add_missing_prey) # apply across all hauls for this predator
+
+# bind into a list
+
+diet_by_haul_zeroes <- rbindlist(diet_by_haul_list)
+
+diet_by_year <- diet_by_haul_zeroes %>%
+  group_by(Year, Prey_at_name) %>%
+  summarise(Mean_prop = mean(Prop_weight)) %>%
+  arrange(Year, desc(Mean_prop))
+```
+Results look like what we can obtain from [here](https://apps-afsc.fisheries.noaa.gov/refm/reem/webdietdata/diettableintro.php).
+
+Let's plot this. Let's drop all zeroes (and in fact anything below 5% of the diet from the figures - but keep it for the actual diet matrix)
+```{r,fig.width=10,fig.height=6}
+diet_by_year <- diet_by_year %>% group_by(Year) %>% mutate(Cum_prop = cumsum(Mean_prop)) %>% ungroup()
+
+diet_by_year1 <- diet_by_year %>% filter(Cum_prop < 0.95) # discard smallc ontributions for visualisation
+
+ggplot()+
+  geom_bar(data = diet_by_year1, aes(x = Year, y = Mean_prop, fill = Prey_at_name), stat = "identity", position = "stack")+
+  scale_fill_viridis_d()+
+  theme_minimal()
+```
+Hard to read. Plot again but discard anything that makes <5% of the diet. 
+
+```{r,fig.width=10,fig.height=6}
+diet_by_year2 <- diet_by_year %>% filter(Mean_prop > 0.05) # discard small ontributions for visualisation
+
+ggplot()+
+  geom_bar(data = diet_by_year2, aes(x = Year, y = Mean_prop, fill = Prey_at_name), stat = "identity", position = "stack")+
+  scale_fill_viridis_d()+
+  theme_minimal()
+```
+
+Now getting averages for all years, to parameterize the diet. We may give more or less weight to some years as we go. All prey species shuld be present already.
+```{r}
+diet_all_years <- diet_by_year %>% select(-Cum_prop) %>%
+  group_by(Prey_at_name) %>%
+  summarize(Diet_proportion = mean(Mean_prop)) %>%
+  arrange(desc(Diet_proportion))
+
+head(diet_all_years, 20)
+```
+
+View this.
+```{r,fig.width=6,fig.height=6}
+diet_all_years %>% mutate(Cum_prop = cumsum(Diet_proportion), Year = "All years") %>%
+  filter(Diet_proportion > 0.05) %>% # aid visualisation
+  ggplot()+
+  geom_bar(aes(x = Year, y = Diet_proportion, fill = Prey_at_name), stat = "identity", position = "stack")+
+  scale_fill_viridis_d()+
+  theme_minimal()
+```
+
+# Operationalize to all predators
+
+One first useful product would be to produce a table like the one above for all predators. In this case, we will need to add zeroes for all prey species to all predators. This will be a large table / plot, and a Shiny app could be a better option, but this is a start.
+
+Start from "stomach" frame, and apply the workflow above (less the plots) to all predator species. Pull "all_prey" from the stomach data set.
+```{r,message=FALSE}
+all_predators <- stomach %>% select(Pred_at_name) %>% distinct() %>% pull()
+all_prey <- stomach %>% select(Prey_at_name) %>% distinct() %>% pull()
+
+diet_prop_calculator <- function(predator) {
+  stomach_pred <- stomach %>% filter(Pred_at_name == predator)
+  diet_by_haul <- stomach_pred %>%
+    group_by(Year, Hauljoin) %>%
+    mutate(Total_ingested = sum(Prey_weight)) %>%
+    ungroup() %>%
+    group_by(Pred_at_name, Year, Hauljoin, Prey_at_name) %>%
+    summarise(Prop_weight = sum(Prey_weight)/Total_ingested) %>%
+    distinct() %>%
+    ungroup()
+  
+  # need to add zeroes of all species that do not appear in a haul as prey for this predator. Then we can take means of all hauls.
+  all_hauls <- diet_by_haul %>% select(Hauljoin) %>% distinct() %>% pull() # extract hauljoins for each predator
+  
+  add_missing_prey <- function(hauljoin){ # call this one in the function below
+    this_haul <- diet_by_haul %>% filter(Hauljoin == hauljoin)
+    missing_prey <- data.frame("Prey_at_name" = setdiff(all_prey, this_haul$Prey_at_name))
+    missing_prey_frame <- missing_prey %>% mutate(Pred_at_name = this_haul$Pred_at_name[1], Year = this_haul$Year[1], Hauljoin = this_haul$Hauljoin[1], Prop_weight = 0) %>% select(Pred_at_name,Year,Hauljoin,Prey_at_name,Prop_weight)
+    haul_frame <- rbind(this_haul,missing_prey_frame)
+    return(haul_frame)
+  }
+  
+  diet_by_haul_list <- purrr::map(all_hauls,add_missing_prey) # apply across all hauls for this predator
+  
+  # bind into a list
+  
+  diet_by_haul_zeroes <- rbindlist(diet_by_haul_list)
+  
+  diet_by_year <- diet_by_haul_zeroes %>%
+    group_by(Pred_at_name,Year, Prey_at_name) %>%
+    summarise(Mean_prop = mean(Prop_weight)) %>%
+    arrange(Year, desc(Mean_prop))
+  
+  # all years 
+  
+  diet_all_years <- diet_by_year %>%
+    group_by(Pred_at_name,Prey_at_name) %>%
+    summarize(Diet_proportion = mean(Mean_prop)) %>%
+    arrange(Prey_at_name)
+  
+  return(diet_all_years)
+}
+
+diet_by_predator_list <- purrr::map(all_predators,possibly(diet_prop_calculator,NA))
+
+# remove NAs, which seem to be species that are in the database but are not reported for the GOA
+
+diet_by_predator_list <- diet_by_predator_list[!is.na(diet_by_predator_list)]
+
+# bind it into a dataframe
+
+diet_all <- rbindlist(diet_by_predator_list)
+```
+
+Plot this. We can make zeroes NA to help visualise.
+```{r, fig.width = 14, fig.height=12}
+diet_all[diet_all == 0] <- NA
+
+ggplot()+
+  geom_tile(data = diet_all, aes(x = Prey_at_name, y = Pred_at_name, fill = Diet_proportion), color = "darkgrey")+
+  scale_fill_viridis()+
+  #scale_fill_gradient2(low = "blue", high = "red", midpoint = .5, na.value="grey")+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3, size = 14),
+        axis.text.y = element_text(size = 14))+
+  labs(title = "Proportion of predator diet", x = "Prey", y = "Predator")
+
+ggsave("diet_reem.png", height = 10, width = 14, unit = "in", dpi = 600)
+```
+
+Hard to read, an interactive plot would be better. But there we have it. Let's write a table, too.
+```{r}
+diet_all[is.na(diet_all)] <- 0
+
+diet_all %>% pivot_wider(names_from = Prey_at_name, values_from = Diet_proportion) %>%
+  kbl(format = "markdown", digits = 5) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size = 7)
+```
+
+Check that here it all adds up to 1.
+```{r}
+check_sum <- diet_all %>% group_by(Pred_at_name) %>% summarise(check = sum(Diet_proportion))
+```
+

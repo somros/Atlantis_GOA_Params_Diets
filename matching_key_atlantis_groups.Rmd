@@ -1,0 +1,114 @@
+---
+title: "Matching NODC to Atlantis groups"
+author: "Alberto Rovellini"
+date: "6/11/2021"
+output: html_document
+---
+
+# Purpose
+
+This document attempts to use matching keys that we have already produced for the bottom trawl data to map as many of the NODC codes to our Atlantis groups as possible.
+
+First we will attempt matching patterns with the species name column of the bottom trawl key, then with the common name column of the same key, then with the key for the DFO data. Potentially many will be unmatched, but even sorting out half of them will be a good result.
+
+Also drop those NODC that do not appear in the stomach content or prey length data for the GOA.
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include = FALSE}
+library(tidyverse)
+library(viridis)
+library(kableExtra)
+library(data.table)
+```
+
+```{r}
+select <- dplyr::select
+```
+
+Import data.
+```{r}
+stomach <- read.csv("data/1_Gulf Of Alaska_RawPP.csv")
+prey_length <- read.csv("data/1_Gulf Of Alaska_RawPL.csv")
+nodc_key_native <- read.csv("data/PreyNODCForWeb.csv")
+```
+
+Clean column names.
+```{r}
+prey_length <- prey_length %>% set_names(gsub("X.","",colnames(prey_length)))
+```
+
+Import previous keys we have used.
+```{r}
+race_key <- read.csv("data/RACE_species_goa_Atlantis.csv")
+dfo_key <- read.csv("data/dfo_species_atlantis.csv")
+goa_groups <- read.csv("data/GOA_Groups.csv", fileEncoding = "UTF-8-BOM")
+```
+
+Do this iteratively. Start from the RACE key. Do it row by row. Fist, add a new column with no parentheses, because they mess up the string subsetting.
+```{r}
+nodc_key <- nodc_key_native
+
+nodc_key$Name1 <- gsub("\\(|\\)", "", nodc_key$Name)
+nodc_key$Atlantis.group <- NA
+
+for(i in 1:nrow(nodc_key)) {
+  if(sapply(strsplit(nodc_key$Name1[i], " "), length)>3) {
+    group <- race_key[grep(paste(word(nodc_key$Name1[i], c(-2,-1)), collapse = " ", sep = " "),race_key$Scientific.Name),]$Atlantis.group
+    if(is_empty(group)){
+      group <- race_key[unlist(lapply(word(nodc_key$Name1[i], c(1,2)), FUN = function(x){grep(x,race_key$Common.Name)})),,]$Atlantis.group
+    }
+    if(is_empty(group)){ # fill a few more gaps with data from DFO
+      group <- race_key[unlist(lapply(word(nodc_key$Name1[i], c(-2,-1)), FUN = function(x){grep(x,dfo_key$Scientific.Name,ignore.case = TRUE)})),]$Atlantis.group
+    }
+    if(is_empty(group)){
+      group <- race_key[unlist(lapply(word(nodc_key$Name1[i], c(1,2)), FUN = function(x){grep(x,dfo_key$English.common.name,ignore.case = TRUE)})),]$Atlantis.group
+    }
+    if(length(unique(levels(factor(unlist(strsplit(group, " ")))))) == 1) {
+      group <- unlist(strsplit(group, " "))[1]
+    }
+    if(is_empty(group)) {
+      nodc_key$Atlantis.group[i] <- NA
+    } else {
+      nodc_key$Atlantis.group[i] <- paste(group, collapse = " ", sep = " ")
+    }
+  }
+}
+
+nodc_key[is.na(nodc_key)] <- ""
+```
+This takes care of about 2/3 of the species. Many of them have multiple entries and need to be cleaned up. One third of these is empty. 
+
+Subset this to the species that are found in the GOA surveys, because this includes also BS and WC.
+```{r}
+# find all nodc of pred and prey from both stomach and prey length data sets
+pred_nodc <- rbind(stomach %>% select(Pred_nodc) %>% distinct(), prey_length %>% select(Pred_nodc) %>% distinct()) %>% distinct() %>% set_names("nodc")
+prey_nodc <- rbind(stomach %>% select(Prey_nodc) %>% distinct(), prey_length %>% select(Prey_nodc) %>% distinct()) %>% distinct() %>% set_names("nodc")
+
+all_nodc <- rbind(pred_nodc,prey_nodc) %>% distinct() %>% pull()
+
+nodc_key_goa <- nodc_key %>% filter(Nodc %in% all_nodc)
+```
+
+Print this out.
+```{r}
+# write.csv(nodc_key_goa, "data/nodc_key_goa.csv", row.names = FALSE)
+```
+
+Read in the amended version, and map the group codes to the Atlantis group long names.
+
+Something happened to the NODC values in this version (likely when saving/manipulating in Excel...), so instead load it here, load the native NODC key, and re-match the NODC by name of the record. For the time being.
+```{r}
+nodc_key1 <- read.csv("data/nodc_key1.csv")
+nodc_key1 <- nodc_key1 %>% select(-Nodc,-Name1)
+
+nodc_key1 <- nodc_key1 %>% left_join(nodc_key_native, by = "Name")
+
+# now bring in the Atlantis groups
+nodc_key1 <- nodc_key1 %>% left_join(goa_groups %>% select(Code,Name,LongName), by = c("Atlantis.group" = "Code"))
+nodc_key1 <- nodc_key1 %>% na.omit()
+
+nodc_matching_key <- nodc_key1
+save(nodc_matching_key, file = "data/nodc_matching_key.Rdata")
+```

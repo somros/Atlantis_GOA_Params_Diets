@@ -1,0 +1,98 @@
+---
+title: "Prey length information"
+author: "Alberto Rovellini"
+date: "6/10/2021"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+# Purpose
+
+This document explores the prey length data that can be obtained from [REEM](https://apps-afsc.fisheries.noaa.gov/refm/reem/webdietdata/dietdataintro.php).
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(viridis)
+library(kableExtra)
+library(data.table)
+```
+
+```{r}
+select <- dplyr::select
+```
+
+Import data.
+```{r}
+stomach <- read.csv("data/1_Gulf Of Alaska_RawPP.csv")
+prey_length <- read.csv("data/1_Gulf Of Alaska_RawPL.csv")
+```
+
+Clean column names.
+```{r}
+prey_length <- prey_length %>% set_names(gsub("X.","",colnames(prey_length)))
+```
+
+Take a look at the hauls from the two data sets.
+```{r}
+stomach_hauls <- stomach %>% select(Hauljoin) %>% distinct() %>% pull()
+length_hauls <- prey_length %>% select(Hauljoin) %>% distinct() %>% pull()
+```
+
+Prey length is available for a little over half the hauls that we have gut contents for. Within a haul, do we have length information for all stomachs or only for some? And within a stomach, do we have information for all prey items or only for some? Sure the state of digestion matters.
+```{r}
+random_haul <- sample(length_hauls,1) # pick a random haul
+
+# for this haul, how many stomachs do we have?
+
+all_stomachs <- stomach %>% filter(Hauljoin == random_haul) %>% select(Pred_specn) %>% distinct() %>% arrange() %>% pull() 
+length_stomachs <- prey_length %>% filter(Hauljoin == random_haul) %>% select(Pred_specn) %>% distinct() %>% arrange() %>% pull() 
+
+# display
+all_stomachs
+length_stomachs
+
+# now pick a random stomach 
+
+random_stomach <- sample(length_stomachs,1)
+
+stomach %>% filter(Hauljoin == random_haul, Pred_specn == random_stomach)
+prey_length %>% filter(Hauljoin == random_haul, Pred_specn == random_stomach)
+```
+Prey length is available for only some of the stomachs and for some of the prey itmes within each stomach.
+
+Is the list of prey the same in the two data sets? I expect the prey species in the length_prey set to be limited to fish and some crustaceans, whereas the prey list in the stomach content data likely includes a lot more species (e.g. other invertebrates).
+
+Note that these data sets report the species aggregated into groups, but we can get the scientific name and come up with our own grouping from the matching key (we probably should do this regardless).
+```{r}
+measured_prey <- prey_length %>% select(Prey_Name) %>% distinct() %>% pull()
+```
+
+Have a look at the prey that is found in the entire dataset. What are the prey items that were never measured?
+```{r}
+all_prey <- read.csv("data/PreyNODCForWeb.csv")
+
+non_measured <- setdiff(all_prey %>% select(Name) %>% pull(),measured_prey)
+non_measured
+```
+
+Invertebrates are not measured. There are also a number of fish records. Remember, not all hauls and stomachs are sub-sampled for prey size.
+
+Does the NODC key only map to prey, or also to predator?
+```{r}
+nodc <- all_prey$Nodc
+nodc_pred <- stomach %>% select(Pred_nodc) %>% distinct() %>% pull()
+nodc_prey <- stomach %>% select(Prey_nodc) %>% distinct() %>% pull()
+
+length(unique(factor(c(nodc_pred, nodc_prey))))
+
+setdiff(nodc_pred, nodc)
+setdiff(nodc_prey, nodc)
+```
+With a couple of execptions, all NODC values in the predators and prey lists are found in the NODC key, which actually contains a lot more records than what is in the stomach data set. This last fact is likely because this is a key for GOA, BS, and WC. 
