@@ -1,0 +1,284 @@
+---
+title: "Exploring GOA diet data: comparing different indexes and visualising trophic interactions"
+author: "Alberto Rovellini"
+date: "1/7/2022"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+# Purpose
+
+A look at the diet data for the GOA available for download from the [REEM](https://apps-afsc.fisheries.noaa.gov/refm/reem/webdietdata/dietdataintro.php) webpage. Data for "All species" for the Gulf of Alaska was downloaded. A data description is available [here](https://archive.fisheries.noaa.gov/afsc/refm/reem/data/DBDescription_WebData.pdf). 
+
+There is information on the % weight, numbers, and frequency of occurrence for prey [here](https://apps-afsc.fisheries.noaa.gov/refm/reem/webdietdata/diettableintro.php). This will be good to double-check.
+
+We calculate three trophic indexes to describe the interactions between prey X and predator Y.
+
+1. Weight-based. 
+2. Number-based
+3. Occurrence-based
+
+Comparing these three will be interesting. 
+
+** Level of aggregation
+This keeps being difficult to deal with, especially when we will look into a size-based extension of this.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,include=FALSE}
+library(tidyverse)
+library(viridis)
+library(kableExtra)
+library(data.table)
+```
+
+```{r}
+select <- dplyr::select
+```
+
+# Import data
+
+How many predators do we have information for? And how many prey species?
+```{r}
+stomach <- read.csv("../data/1_Gulf Of Alaska_RawPP.csv")
+
+stomach %>% select(Pred_name) %>% distinct() %>% pull()
+stomach %>% select(Prey_Name) %>% distinct() %>% pull()
+
+load("../data/nodc_matching_key.Rdata")
+
+# we are missing Raja rhina (longnose skate) somehow, add it here manually).
+rr <- data.frame(Name.x = 'Raja rhina', Atlantis.group = 'SKL', Nodc = 8713040108, Name.y = 'Skate_longnose', LongName = 'Longnose skate')
+
+nodc_matching_key <- rbind(nodc_matching_key,rr)
+```
+
+We have 81 predators, and prey species are aggregated into 90 groups. 
+
+Let's rearrange things into Atlantis groups, instead of species.
+```{r}
+stomach <- stomach %>% left_join(nodc_matching_key %>% 
+                                   select(Nodc,Atlantis.group,Name.y) %>% 
+                                   set_names(c("Pred_nodc","Pred_at_code","Pred_at_name")), 
+                                 by = "Pred_nodc")
+# add prey now
+stomach <- stomach %>% left_join(nodc_matching_key %>% 
+                                   select(Nodc,Atlantis.group,Name.y) %>% 
+                                   set_names(c("Prey_nodc","Prey_at_code","Prey_at_name")), 
+                                 by = "Prey_nodc")
+
+# NAs in the Prey_at_code and Prey_at_name columns indicate empty stomachs or prey that was not identified to a level sufficient to attribute it to an Atlantis group (e.g. "Misc. teleost"). Drop these occurrences.
+
+stomach <- stomach %>% filter(!is.na(Prey_at_code)) %>% filter(!is.na(Pred_at_code))
+
+stomach %>% pull(Pred_at_name) %>% unique()
+```
+
+Next, for each individual predator, we need to add up the ingested prey that is different species but the same Atlantis group. For instance, if a cod ate two species of Calanus, each with a NODC, these will need to be aggregated to "Large zooplankton".
+```{r}
+stomach <- stomach %>% group_by(Year,Hauljoin,Pred_at_code,Pred_at_name,Pred_nodc,Pred_specn,Rlat,Rlong,Prey_at_code,Prey_at_name) %>%
+  summarise(Prey_count = sum(Prey_cnt), Prey_weight = sum(Prey_twt)) %>% ungroup()
+```
+
+Subset diet data to 1990-2010 and see if that is enough to characterize the diets to some extent. 
+```{r}
+stomach_old <- stomach %>% filter(Year %in% 1990:2010)
+```
+
+# Weight proportion in predator stomach
+
+We have two options regarding the level of aggregation (likely more than two, if we pull in strata instead). The extremes are by haul and then average across the GOA per year, and then over all years, or skip the hauls and do it by year in the GOA, then average across years. The by-haul method and then average across all hauls returns the same results as the summary data published by REEM on their website. At the same time, our goal needs coarse characterisations, and one may argue that pooling all fish and their feed for a year in the GOA is probably more appropriate and does not create false precision.
+
+There is another issue with averaging proportions here. Say that three hauls have proportions of 0.1, 0.2, and 0.9. The mean of these is 0.1+0.2+0.9=1.2/3=0.4. But what if haul 1 contained 1000 fish and hauls 2 and 3 10 each? 
+```{r}
+# All GOA by year
+# time series of consumption of prey for this predator. Ignore hauls, this acts GOA-wide
+ts_weight <- stomach_old %>%
+  group_by(Pred_at_name, Prey_at_name, Year) %>% 
+  summarize(sum_w_prey = sum(Prey_weight, na.rm=T)) %>% # how much of prey X was eaten by predator Y in year Z
+  group_by(Pred_at_name, Year) %>%
+  mutate(sum_w = sum(sum_w_prey)) %>% # how much prey (all species) was eaten by pred Y in year Z
+  group_by(Pred_at_name, Prey_at_name, Year) %>% 
+  summarize(pcW_stom = ifelse(sum_w!=0, sum_w_prey/sum_w, 0) ) # proportion ingested X and total ingested
+
+ts_weight %>%
+  ggplot() +
+  geom_bar(aes(x=Year, y=pcW_stom, fill=Prey_at_name), stat="identity") +
+  scale_fill_viridis_d() +
+  xlab("Predator") +
+  ylab(paste("% of",'weigtj')) +
+  theme_bw()+
+  theme(legend.text=element_text(size=6), plot.title = element_text(hjust = 0.5)) +
+  facet_wrap(~Pred_at_name)
+
+# By haul
+# if you want to do things by haul at all costs, then you need to add the zeroes. E.g., a species was eaten at 3/100 hauls, and it was not in the other 97. If we do not include this information, the proportion will be way too high 
+ts_weight_haul <- stomach_old %>%
+  group_by(Pred_at_name, Prey_at_name, Year, Hauljoin) %>% 
+  summarize(sum_w_prey = sum(Prey_weight, na.rm=T)) %>% # how much of prey X was eaten by predator Y in year Z
+  group_by(Pred_at_name, Year, Hauljoin) %>%
+  mutate(sum_w = sum(sum_w_prey)) %>% # how much prey (all species) was eaten by pred Y in year Z
+  group_by(Pred_at_name, Prey_at_name, Year, Hauljoin) %>% 
+  summarize(pcW_stom = ifelse(sum_w!=0, sum_w_prey/sum_w, 0)) %>% # proportion ingested X and total ingested
+  ungroup() %>%
+  complete(Prey_at_name, nesting(Pred_at_name,Year,Hauljoin), fill = list(pcW_stom=0)) %>% 
+  group_by(Pred_at_name, Prey_at_name, Year) %>%
+  summarize(pcW_stom_mean = mean(pcW_stom, na.rm=T)) # this is not weighted
+
+ts_weight_haul %>%
+  ggplot() +
+  geom_bar(aes(x=Year, y=pcW_stom_mean, fill=Prey_at_name), stat="identity") +
+  scale_fill_viridis_d() +
+  xlab("Predator") +
+  ylab(paste("% of",'Weight')) +
+  theme_bw()+
+  theme(legend.text=element_text(size=6), plot.title = element_text(hjust = 0.5))+
+  facet_wrap(~Pred_at_name)
+
+# By haul and weighted by nubmer of predators sampled by the haul. A bit convoluted
+ts_weight_haul_weighted <- stomach_old %>%
+  group_by(Year,Hauljoin,Pred_at_name) %>%
+  mutate(Npred = length(unique(Pred_specn))) %>% # set up a counter for the n of predators, becomes a property of the haul like the hauljoin field
+  ungroup() %>%
+  group_by(Pred_at_name, Prey_at_name, Year, Hauljoin, Npred) %>% 
+  summarize(sum_w_prey = sum(Prey_weight, na.rm=T)) %>% # how much of prey X was eaten by predator Y in year Z
+  group_by(Pred_at_name, Year, Hauljoin, Npred) %>%
+  mutate(sum_w = sum(sum_w_prey)) %>% # how much prey (all species) was eaten by pred Y in year Z
+  group_by(Pred_at_name, Prey_at_name, Year, Hauljoin, Npred) %>% 
+  summarize(pcW_stom = ifelse(sum_w!=0, sum_w_prey/sum_w, 0)) %>% # proportion ingested X and total ingested
+  ungroup() %>%
+  complete(Prey_at_name, nesting(Pred_at_name,Year,Hauljoin,Npred), fill = list(pcW_stom=0)) %>% # add zeroes, i.e. the predator had 0 g of prey XXX in its stomach
+  mutate(pcW_weighted = pcW_stom*Npred) %>% # multiply the proportions by the number of predators, to give them more weight the more predators there were in a haul
+  group_by(Pred_at_name, Year) %>%
+  mutate(Tot_pred = sum(pcW_weighted)) %>% # this returns the total number of predators of a species in a haul 
+  ungroup() %>%
+  group_by(Pred_at_name, Prey_at_name, Year, Tot_pred) %>% # 
+  summarize(pcW_weighted = sum(pcW_weighted)/Tot_pred) %>% # sum across hauls and divide by total n of predators to have an adjusted (weighted) proportion of a prey in the diet, weighted for the number of fish in each haul
+  distinct()
+
+ts_weight_haul_weighted %>%
+  ggplot() +
+  geom_bar(aes(x=Year, y=pcW_weighted, fill=Prey_at_name), stat="identity") +
+  scale_fill_viridis_d() +
+  xlab("Predator") +
+  ylab(paste("% of",'Weight')) +
+  theme_bw()+
+  theme(legend.text=element_text(size=6), plot.title = element_text(hjust = 0.5))+
+  facet_wrap(~Pred_at_name)
+  
+```
+There are differences between weighing by number of predators in a haul and not doing it. 
+
+Doing things at GOA-level seems to return much different results compared to working by haul and then taking an average of all hauls. For ATF, the contribution of pollock to the diet is far higher, for example, whereas the proportion of euphausiids is very low on the total ingested prey of ATF in the GOA, but may be an important resource locally, making up for most of the ingested prey at some locations and thus driving up the proportion when we take a GOA-wide average. I fear that using approach 1 would drown out some of these important, localized diet components, and as a result the group will have limited feeding on resources that they clearly use in an opportunistic way.
+
+Worth noting that we loose a number of species if we only use data from 1990-2000.
+
+# Number of prey items in predator's stomach
+
+Note that the column Prey_count is often NA in the data. Use only the haul-level, weighted method here.
+```{r}
+# By haul and weighted by nubmer of predators sampled by the haul. A bit convoluted
+ts_number_haul_weighted <- stomach_old %>%
+  group_by(Year,Hauljoin,Pred_at_name) %>%
+  mutate(Npred = length(unique(Pred_specn))) %>% # set up a counter for the n of predators, becomes a property of the haul like the hauljoin field
+  ungroup() %>%
+  group_by(Pred_at_name, Prey_at_name, Year, Hauljoin, Npred) %>% 
+  summarize(sum_n_prey = sum(Prey_count, na.rm=T)) %>% # how much of prey X was eaten by predator Y in year Z
+  group_by(Pred_at_name, Year, Hauljoin, Npred) %>%
+  mutate(sum_n = sum(sum_n_prey)) %>% # how much prey (all species) was eaten by pred Y in year Z
+  group_by(Pred_at_name, Prey_at_name, Year, Hauljoin, Npred) %>% 
+  summarize(pcn_stom = ifelse(sum_n!=0, sum_n_prey/sum_n, 0)) %>% # proportion ingested X and total ingested
+  ungroup() %>%
+  complete(Prey_at_name, nesting(Pred_at_name,Year,Hauljoin,Npred), fill = list(pcn_stom=0)) %>% # add zeroes, i.e. the predator had 0 g of prey XXX in its stomach
+  mutate(pcn_weighted = pcn_stom*Npred) %>% # multiply the proportions by the number of predators, to give them more weight the more predators there were in a haul
+  group_by(Pred_at_name, Year) %>%
+  mutate(Tot_pred = sum(pcn_weighted)) %>% # this returns the total number of predators of a species in a haul 
+  ungroup() %>%
+  group_by(Pred_at_name, Prey_at_name, Year, Tot_pred) %>% # 
+  summarize(pcn_weighted = sum(pcn_weighted)/Tot_pred) %>% # sum across hauls and divide by total n of predators to have an adjusted (weighted) proportion of a prey in the diet, weighted for the number of fish in each haul
+  distinct()
+
+ts_number_haul_weighted %>%
+  ggplot() +
+  geom_bar(aes(x=Year, y=pcn_weighted, fill=Prey_at_name), stat="identity") +
+  scale_fill_viridis_d() +
+  xlab("Predator") +
+  ylab(paste("% of",'numbers')) +
+  theme_bw()+
+  theme(legend.text=element_text(size=6), plot.title = element_text(hjust = 0.5))+
+  facet_wrap(~Pred_at_name)
+```
+
+Let's have a first comparison.
+```{r}
+this_species <- 'Pollock'
+
+ts_weight_haul_weighted %>%
+  filter(Pred_at_name==this_species) %>%
+  arrange(Pred_at_name,Year,desc(pcW_weighted)) %>%
+  group_by(Pred_at_name,Year) %>%
+  mutate(cumu=cumsum(pcW_weighted)) %>%
+  filter(cumu<0.95) %>%
+  ggplot() +
+  geom_bar(aes(x=Year, y=pcW_weighted, fill=Prey_at_name), stat="identity") +
+  scale_fill_viridis_d() +
+  xlab("Predator") +
+  ylab(paste("% of",'weight')) +
+  theme_bw()+
+  theme(legend.text=element_text(size=6), plot.title = element_text(hjust = 0.5))
+
+
+ts_number_haul_weighted %>%
+  filter(Pred_at_name==this_species) %>%
+  arrange(Pred_at_name,Year,desc(pcn_weighted)) %>%
+  group_by(Pred_at_name,Year) %>%
+  mutate(cumu=cumsum(pcn_weighted)) %>%
+  filter(cumu<0.95) %>%
+  ggplot() +
+  geom_bar(aes(x=Year, y=pcn_weighted, fill=Prey_at_name), stat="identity") +
+  scale_fill_viridis_d() +
+  xlab("Predator") +
+  ylab(paste("% of",'numbers')) +
+  theme_bw()+
+  theme(legend.text=element_text(size=6), plot.title = element_text(hjust = 0.5))
+```
+Some pretty substantial differences between weight and numbers. To illustrate them, think of two cods of the same size, eating pollock. Cod 1 eats three 1-kg pollocks. Cod 2 eats thirty 100-g pollocks. They both ate the same weight of pollock, but one cod ate many more fish. This is informative of ontogenetic preferences in the diet, for example. In general, if there is weight information it should be considered more useful than frequency information (for one thing, they cannot count small stuff reliably). Also, a predator eating 10 sandlance and 1 halibut probably still got much more energy from the halibut, making me steer towards weight, which is the currency in Atlantis anyway.
+
+## Average across years
+
+Kind of along the same lines, we may want to give different weights to different years here. This may attempt to reflect the number of hauls per year, giving more weight to years that had more hauls, or perhaps we may want to dampen the effect of some atypical years. For now, do a simple mean of the proportion for each predator-prey pair.
+
+Reflect on what period you want to use for this. Using fewer years will mean loosing some species. 
+```{r, fig.width = 14, fig.height=12}
+diet_all_years <- ts_weight_haul_weighted %>% 
+  group_by(Pred_at_name, Prey_at_name) %>%
+  summarise(pcW_mean = mean(pcW_weighted, na.rm = TRUE)) 
+
+diet_all_years %>%
+  mutate(pcW_mean = na_if(pcW_mean,0)) %>%
+  ggplot()+
+  geom_tile(aes(x = Prey_at_name, y = Pred_at_name, fill = pcW_mean), color = "darkgrey")+
+  scale_fill_viridis()+
+  #scale_fill_gradient2(low = "blue", high = "red", midpoint = .5, na.value="grey")+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3, size = 14),
+        axis.text.y = element_text(size = 14))+
+  labs(title = "Proportion of predator diet", x = "Prey", y = "Predator")
+```
+
+Let's write a table, too.
+```{r}
+diet_all_years %>% pivot_wider(names_from = Prey_at_name, values_from = pcW_mean) %>%
+  kbl(format = "markdown", digits = 5) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size = 7)
+```
+
+Check that here it all adds up to 1.
+```{r}
+check_sum <- diet_all_years %>% group_by(Pred_at_name) %>% summarise(check = sum(pcW_mean))
+```

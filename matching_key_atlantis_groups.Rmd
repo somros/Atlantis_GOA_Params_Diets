@@ -29,9 +29,9 @@ select <- dplyr::select
 
 Import data.
 ```{r}
-stomach <- read.csv("data/1_Gulf Of Alaska_RawPP.csv")
-prey_length <- read.csv("data/1_Gulf Of Alaska_RawPL.csv")
-nodc_key_native <- read.csv("data/PreyNODCForWeb.csv")
+stomach <- read.csv("..data/1_Gulf Of Alaska_RawPP.csv")
+prey_length <- read.csv("..data/1_Gulf Of Alaska_RawPL.csv")
+nodc_key_native <- read.csv("C:/Users/Alberto Rovellini/Documents/GOA/Parametrization/Diet/data/PreyNODCForWeb.csv")
 ```
 
 Clean column names.
@@ -41,9 +41,9 @@ prey_length <- prey_length %>% set_names(gsub("X.","",colnames(prey_length)))
 
 Import previous keys we have used.
 ```{r}
-race_key <- read.csv("data/RACE_species_goa_Atlantis.csv")
-dfo_key <- read.csv("data/dfo_species_atlantis.csv")
-goa_groups <- read.csv("data/GOA_Groups.csv", fileEncoding = "UTF-8-BOM")
+race_key <- read.csv("..data/RACE_species_goa_Atlantis.csv")
+dfo_key <- read.csv("..data/dfo_species_atlantis.csv")
+goa_groups <- read.csv("C:/Users/Alberto Rovellini/Documents/GOA/Parametrization/Diet/data/GOA_Groups.csv", fileEncoding = "UTF-8-BOM")
 ```
 
 Do this iteratively. Start from the RACE key. Do it row by row. Fist, add a new column with no parentheses, because they mess up the string subsetting.
@@ -100,15 +100,16 @@ Read in the amended version, and map the group codes to the Atlantis group long 
 
 Something happened to the NODC values in this version (likely when saving/manipulating in Excel...), so instead load it here, load the native NODC key, and re-match the NODC by name of the record. For the time being.
 ```{r}
-nodc_key1 <- read.csv("data/nodc_key1.csv")
-nodc_key1 <- nodc_key1 %>% select(-Nodc,-Name1)
+# 1/11/2022 changed from nodc_key1 to nodc_key2, where FOL is changed to EUL and DFS for everything else
+nodc_key2 <- read.csv("C:/Users/Alberto Rovellini/Documents/GOA/Parametrization/Diet/data/nodc_key2.csv")
+nodc_key2 <- nodc_key2 %>% select(-Nodc,-Name1)
 
-nodc_key1 <- nodc_key1 %>% left_join(nodc_key_native, by = "Name")
+nodc_key2 <- nodc_key2 %>% left_join(nodc_key_native, by = "Name")
 
 # now bring in the Atlantis groups
-nodc_key1 <- nodc_key1 %>% left_join(goa_groups %>% select(Code,Name,LongName), by = c("Atlantis.group" = "Code"))
-nodc_key1 <- nodc_key1 %>% na.omit()
+nodc_key2 <- nodc_key2 %>% left_join(goa_groups %>% select(Code,Name,LongName), by = c("Atlantis.group" = "Code"))
+nodc_key2 <- nodc_key2 %>% na.omit()
 
-nodc_matching_key <- nodc_key1
-save(nodc_matching_key, file = "data/nodc_matching_key.Rdata")
+nodc_matching_key <- nodc_key2
+save(nodc_matching_key, file = "C:/Users/Alberto Rovellini/Documents/GOA/Parametrization/Diet/data/nodc_matching_key_01012022.Rdata") # now no FOL and EUL + DFS
 ```

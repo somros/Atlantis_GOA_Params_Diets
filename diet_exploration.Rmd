@@ -34,7 +34,7 @@ select <- dplyr::select
 
 How many predators do we have information for? And how many prey species?
 ```{r}
-stomach <- read.csv("data/1_Gulf Of Alaska_RawPP.csv")
+stomach <- read.csv("../data/1_Gulf Of Alaska_RawPP.csv")
 
 stomach %>% select(Pred_name) %>% distinct() %>% pull()
 stomach %>% select(Prey_Name) %>% distinct() %>% pull()
@@ -115,7 +115,6 @@ ggplot()+
   scale_fill_viridis_d()+
   theme_minimal()
 ```
-
 
 Now getting averages for all years, to parameterize the diet. We may give more or less weight to some years as we go. All prey species shuld be present already.
 ```{r}

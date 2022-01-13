@@ -1,0 +1,154 @@
+---
+title: "GOAIERP diet data"
+author: "Alberto Rovellini"
+date: "1/11/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(viridis)
+library(kableExtra)
+```
+
+NOTE: will need to work with Jamal on this for validation and clarifications. This is just a look at what is there for now.
+
+This document calculates diet proportions for juvenile salmon in the GOA, from GOAIERP data. It aggregates the prey to Atlantis functional groups (need to map those manually but they are not too many). The data contains the life stage of predators, and it really cover mostly juveniles and age 0 individuals. From Jamal: "The juvenile and immature designations are for salmon. Juvenile is the first year at sea (will turn 1 Jan 1st) and immature are salmon older than 1st year of life in the ocean". For the purposes of Atlantis, we cannot assign immature fish to juveniles, because salmon is only mature when it is on its way back into the rivers, but should not be counted as small juvenile if it is large at sea (and there are some large at-sea immature salmon in this data set). I will use this data only for juvenile salmon for the time being. Herring may be worth looking at too, because in the bottom trawl data it only eats euphausiids (because it does not get caught), then again it is very few data points here too (40 stomachs for age 0, and 10 NA).
+
+Read the data. Data consists of a CSV table with data from 2015-2016 or so and a database with data from (2001-2003). Let's start from the CSV, the formats are different so we will need slightly different code.
+```{r}
+dat <- read_excel('../data/GOAIERP/2015-2016 EGOA Diets.xlsx')
+```
+
+Let's get a sense of how many animals this is based on. 
+```{r}
+no_of_stomachs <- dat %>% group_by(CommonName,Pred_LHS) %>% summarise(TotStomachs = sum(Number_of_Stomachs)) %>% arrange(desc(TotStomachs))
+
+head(no_of_stomachs,15)
+```
+Relatively small data set, given the size of the GOA. This really is only for juvenile and immature salmon.
+
+Goal is to obtain a mean diet composition of a life stage of a species. Ideally it would be cool to distinguish between juvenile and adult prey too, but this data set is mostly about juveniles anyway, so there will be limited adults in the prey.
+```{r}
+# keep only cases where the stomach fullness index is >0 and not NA
+dat_tmp <- dat %>% filter(`Stomach_fullness_index(o/ooo)`>0 & !is.na(`Stomach_fullness_index(o/ooo)`))
+
+# drop some columns we should not need
+dat_thin <- dat_tmp %>% select(-(`Minimum_Size(cm)`:`Stomach_fullness_index(o/ooo)`))
+dat_thin <- dat_thin %>% mutate(Year=substr(StationID,1,4)) # assume that the first 4 digits of StationID refer to the year, as this file is for 2015-2016
+dat_long <- dat_thin %>% pivot_longer(cols = (Agonidae:Zaproridae),names_to = "PreyName",values_to="PreyWeight")
+
+dat_long$PreyWeight[is.na(dat_long$PreyWeight)]<-0 # turn NAs to 0's
+```
+
+## From species to Atlantis group
+
+Here we do three things:
+
+1. Select the predators we are interested in: all salmon species, and herring for now.
+2. For herring, change A0 to J and NA to A.
+3. Make key with total number of stomachs of a predator and stage per haul.
+4. Map prey species to Atlantis groups, and add up as appropriate for each predator.
+```{r}
+# 1
+these_species <- c("Chinook Salmon","Chum Salmon","Coho Salmon","Pink Salmon","Sockeye Salmon","Pacific Herring")
+dat_long1 <- dat_long %>% filter(CommonName %in% these_species) 
+
+#2
+dat_long1 <- dat_long1 %>%
+  rowwise() %>%
+  mutate(Pred_LHS = ifelse(is.na(Pred_LHS) | Pred_LHS == 'IM','A','J'))  # this may not apply to other species than those above so be careful reusing this
+
+#3
+# build counter for the number of predators now aggregated by stage - will not need to do it again for Atlantis groups because those coincide with the salmon species 
+nstom <- dat_long1 %>% select(StationID:Year) %>% 
+  distinct() %>%
+  group_by(Year,StationID,EventCode,CommonName,Pred_LHS) %>%
+  summarise(Npred = sum(Number_of_Stomachs)) %>%
+  ungroup()
+
+# join counter with the data set
+dat_long2 <- dat_long1 %>% left_join(nstom, by = c('Year','StationID','EventCode','CommonName','Pred_LHS'))
+  
+dat_long3 <- dat_long2 %>% group_by(Year,StationID,EventCode,Npred,CommonName,Pred_LHS,PreyName) %>%
+  summarize(Prey_ingested_g=sum(PreyWeight)) %>% # this step is to sum between J and IM for salmon
+  ungroup()
+
+#4
+prey_species <- dat_long3 %>% select(PreyName) %>% distinct() %>% arrange()
+#write.csv(prey_species, 'prey_species.csv',row.names = F)
+
+#assigning the groups manually, based on what done before for the bottom trawl data and the REEM diet data, or WORMS if not present there
+prey_species_ag <- read.csv('prey_species_AG.csv')
+
+dat_long4 <- dat_long3 %>% left_join(prey_species_ag, by = 'PreyName') %>%
+  na.omit() %>%
+  group_by(Year,StationID,EventCode,Npred,CommonName,Pred_LHS,Atlantis_code) %>%
+  summarise(Prey_ingested_ag=sum(Prey_ingested_g))
+```
+
+## Get proportions
+
+Use the "Event code" as sampling unit. For consistency with the other analysis, we are going to need to weight these by the number of predators (stomachs) at each station. 
+```{r}
+diet_by_station <- dat_long4 %>%
+  group_by(Year,StationID,EventCode,Npred,CommonName,Pred_LHS) %>%
+  mutate(Total_ingested_g = sum(Prey_ingested_ag)) %>% # how much prey (all species) was eaten by pred Y in year Z
+  group_by(Year,StationID,EventCode,Npred,CommonName,Pred_LHS,Atlantis_code) %>% 
+  summarize(pcW_stom = ifelse(Total_ingested_g!=0,Prey_ingested_ag/Total_ingested_g,0)) %>% # proportion ingested X and total ingested
+  ungroup() %>%
+  complete(Atlantis_code, nesting(Year,StationID,EventCode,Npred,Pred_LHS,CommonName), fill = list(pcW_stom=0)) %>% # add zeroes, i.e. the predator had 0 g of prey XXX stage YYY in its stomach
+  mutate(pcW_weighted = pcW_stom*Npred) %>% # multiply the proportions by the number of predators, to give them more weight the more predators there were in a haul
+  group_by(Year,CommonName,Pred_LHS) %>%
+  mutate(Tot_pred = sum(pcW_weighted)) %>% # this returns the total number of predators of a species in a year 
+  ungroup() %>%
+  group_by(Year,CommonName,Pred_LHS,Atlantis_code,Tot_pred) %>% # 
+  summarize(pcW_weighted = sum(pcW_weighted)/Tot_pred) %>% # sum across hauls and divide by total n of predators to have an adjusted (weighted) proportion of a prey in the diet, weighted for the number of fish in each haul
+  distinct()
+
+# check that the props add up to 1 for all hauls
+diet_by_station %>% group_by(Year,CommonName,Pred_LHS) %>% summarise(check = sum(pcW_weighted)) %>% pull(check) %>% mean()
+```
+
+Join with Atlantis groups for plotting purposes.
+```{r}
+ag <- read.csv('../data/GOA_Groups.csv', fileEncoding = 'UTF-8-BOM')
+ag <- ag %>% select(Code, Name) %>% set_names('Atlantis_code', 'Prey_name')
+
+diet_by_station <- diet_by_station %>% left_join(ag, by = c('Atlantis_code'))
+```
+
+Now group by year and produce a diet matrix with proportion. make sure that the proportions add up to 1. There is a layer of imprecision that we add by averaging diet proportions.
+```{r, fig.width = 12, fig.height = 6}
+# Add a species*stage field
+diet_species_and_stage <- diet_by_station %>% 
+  group_by(CommonName,Pred_LHS,Prey_name) %>%
+  summarise(MeanProp = mean(pcW_weighted)) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(PredName = paste(CommonName,Pred_LHS,sep="_"))
+
+p <- diet_species_and_stage %>% 
+  mutate(MeanProp = ifelse(MeanProp==0,NA,MeanProp)) %>%
+  ggplot()+
+  geom_tile(aes(x=Prey_name,y=PredName,fill=MeanProp),color='darkgrey')+
+  scale_fill_viridis()+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1.05, vjust = 1, size = 14),
+          axis.text.y = element_text(size = 14))+
+  labs(title = "Proportion of predator diet", 
+         x = "Prey", y = "Predator",
+         fill = "Proportion of ingested prey")
+p
+
+ggsave('goaierp.png',p,width = 12, height = 8)
+```
+
+# Older data
+
+There is an older database with some salmon diet data, but it is not useful because there are no metadata or connections in the database to explain the life history stages, the species codes, etc. A shame, because it is almost 5000 rows of data only on salmon, but this version does not seem to be complete. May follow up with Jamal about this one, for now use only the 2015-2016 data.

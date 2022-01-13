@@ -30,8 +30,8 @@ select <- dplyr::select
 
 Import data.
 ```{r}
-stomach <- read.csv("data/1_Gulf Of Alaska_RawPP.csv")
-prey_length <- read.csv("data/1_Gulf Of Alaska_RawPL.csv")
+stomach <- read.csv("../data/1_Gulf Of Alaska_RawPP.csv")
+prey_length <- read.csv("../data/1_Gulf Of Alaska_RawPL.csv")
 ```
 
 Clean column names.
@@ -65,7 +65,7 @@ random_stomach <- sample(length_stomachs,1)
 stomach %>% filter(Hauljoin == random_haul, Pred_specn == random_stomach)
 prey_length %>% filter(Hauljoin == random_haul, Pred_specn == random_stomach)
 ```
-Prey length is available for only some of the stomachs and for some of the prey itmes within each stomach.
+Prey length is available for only some of the stomachs and for some of the prey items within each stomach.
 
 Is the list of prey the same in the two data sets? I expect the prey species in the length_prey set to be limited to fish and some crustaceans, whereas the prey list in the stomach content data likely includes a lot more species (e.g. other invertebrates).
 

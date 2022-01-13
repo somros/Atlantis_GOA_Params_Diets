@@ -1,0 +1,98 @@
+---
+title: "GOAIERP diet data"
+author: "Alberto Rovellini"
+date: "10/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(viridis)
+library(kableExtra)
+```
+
+NOTE: will need to work with Jamal on this for validation and clarifications. This is just a look at what is there for now.
+
+Read the data. Data consists of a CSV table with data from 2015-2016 or so and a database with data from (2001-2003). Let's start from the CSV, the formats are different so we will need slightly different code.
+```{r}
+dat <- read_excel('../data/GOAIERP/2015-2016 EGOA Diets.xlsx')
+```
+
+Let's get a sense of how many animals this is based on. 
+```{r}
+no_of_stomachs <- dat %>% group_by(CommonName,Pred_LHS) %>% summarise(TotStomachs = sum(Number_of_Stomachs)) %>% arrange(desc(TotStomachs))
+
+head(no_of_stomachs,15)
+```
+Relatively small data set, given the size of the GOA. This really is only for juvenile and immature salmon.
+
+Goal is to obtain a mean diet composition of a life stage of a species. Ideally it would be cool to distinguish between juvenile and adult prey too, but this data set is mostly about juveniles anyway, so there will be limited adults in the prey.
+```{r}
+# keep only cases where the stomach fullness index is >0 and not NA
+dat_tmp <- dat %>% filter(`Stomach_fullness_index(o/ooo)`>0 & !is.na(`Stomach_fullness_index(o/ooo)`))
+
+# drop some columns we should not need
+dat_thin <- dat_tmp %>% select(-(Number_of_Stomachs:`Stomach_fullness_index(o/ooo)`))
+dat_thin <- dat_thin %>% mutate(Year=substr(StationID,1,4)) # assume that the first 4 digits of StationID refer to the year, as this file is for 2015-2016
+dat_long <- dat_thin %>% pivot_longer(cols = (Agonidae:Zaproridae),names_to = "PreyName",values_to="PreyWeight")
+
+dat_long$PreyWeight[is.na(dat_long$PreyWeight)]<-0 # turn NAs to 0's
+```
+
+Use the "Event code" as sampling unit. Average at station level, then global for a stage of a species.
+```{r}
+diet_by_station <- dat_long %>% group_by(Year,StationID,EventCode,CommonName,Pred_LHS,PreyName) %>%
+  summarise(Weight=sum(PreyWeight)) %>%
+  mutate(PropDiet = Weight/sum(Weight)) %>%
+  ungroup()
+
+# now by year
+diet_by_year <- diet_by_station %>% group_by(Year,CommonName,Pred_LHS,PreyName) %>%
+  summarise(MeanProp=mean(PropDiet,na.rm=TRUE)) %>%
+  arrange(Year,CommonName,Pred_LHS,desc(MeanProp)) %>%
+  mutate(CumSum = cumsum(MeanProp)) %>%
+  ungroup()
+```
+
+View for one species as example. Do whatever prey items contribute to 90% of the ingested food to aid visualisation.
+```{r}
+diet_by_year %>% filter(CommonName=="Chum Salmon",Pred_LHS=="J",CumSum<0.95) %>%
+  ggplot()+
+  geom_bar(stat="identity", position="stack", aes(x=Year,y=MeanProp,fill=PreyName))+
+  theme_minimal()
+```
+
+Now group by year and produce a diet matrix with proportion. make sure that the proportions add up to 1. There is a layer of imprecision that we add by averaging diet proportions.
+```{r, fig.width = 12, fig.height = 6}
+# Add a species*stage field
+diet_species_and_stage <- diet_by_year %>% 
+  group_by(CommonName,Pred_LHS,PreyName) %>%
+  summarise(MeanProp = mean(MeanProp)) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(PredName = paste(CommonName,Pred_LHS,sep="_"))
+
+diet_species_and_stage %>% 
+  mutate(MeanProp = ifelse(MeanProp==0,NA,MeanProp)) %>%
+  ggplot()+
+  geom_tile(aes(x=PreyName,y=PredName,fill=MeanProp),color='darkgrey')+
+  scale_fill_viridis()+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3))
+```
+The taxonomic resolution is far higher than Atlantis, so we should map these values to our functional groups. Look at the taxonomic resolution of copepods in this database and the REEM data for groundfish. Depending on that we may split zooplankton in one way or another, also depending on the consistency with ROMS groups. Can we identify a size-based split in copepods in this data, and is there going to be data to support dynamics of the two?
+
+Write out a table.
+```{r}
+diet_species_and_stage %>% pivot_wider(names_from = PreyName, values_from = MeanProp) %>%
+  kbl(format = "markdown", digits = 5)
+```
+
+# Older data
+
+There is an older database with some salmon diet data, but it is not useful because there are no metadata or connections in the database to explain the life history stages, the species codes, etc. A shame, because it is almost 5000 rows of data only on salmon, but this version does not seem to be complete. 

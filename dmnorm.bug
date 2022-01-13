@@ -1,0 +1,18 @@
+
+model {               
+  sigma1 ~ dgamma( SD_rObs_log10a, SD_muObs_log10a) # given the data and the prior, establish posterior distribution for measurement error in log10a  
+  sigma2 ~ dgamma( SD_rObs_b, SD_muObs_b) # given the data and the prior, establish posterior distribution for measurement error in log10a   
+  
+  ro ~ dunif(-0.99,0)     # uniform prior for negative correlation between log10a and b
+  abTrue[1] ~ dnorm(prior_mean_log10a,prior_tau_log10a) # given the data and the prior, get normal posterior distribution for log10a
+  abTrue[2] ~ dnorm(prior_mean_b,prior_tau_b) # given the data and the prior, get normal posterior distribution for b
+  CovObs[1,1] <- pow(sigma1,2)  
+  CovObs[2,2] <- pow(sigma2,2) 
+  CovObs[1,2] <- ro * sigma1 * sigma2 
+  CovObs[2,1] <- CovObs[1,2]
+  TauObs[1:2,1:2] <- inverse(CovObs[1:2,1:2]) # create inverse covariance matrix
+  for(i in 1:N){
+    TauObsI[i,1:2,1:2] <- TauObs[1:2,1:2] * pow(Weights[i],2)   # converts prior SD into prior weighted precision
+    ab[i,1:2] ~ dmnorm(abTrue[1:2],TauObsI[i,1:2,1:2]) # given the data, the priors and the covariance, create multivariate normal posteriors for log(a) and b 
+   }
+}

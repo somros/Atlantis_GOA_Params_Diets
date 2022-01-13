@@ -1,0 +1,343 @@
+---
+title: "Ontogenetic diet preferences - species level"
+author: "Alberto Rovellini"
+date: "1/7/2022"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+# Purpose
+
+Here, we calculate weight-based diet preferences of GOA predators based on bottom trawl data. This document attempts to characterize ontogenetic preferences based on size at 50% maturity. The workflow is as follows:
+
+1. Read in the diet and prey length data from  REEM (see links above).
+2. Read in information on size at 50% maturity for each (fish) species, as done for sdmTMB.
+3. Read in information on length-weight relationships, as done for sdmTMB.
+4. Consider the predator data set. Assign all predator individuals (that we can based on available lmat) to juveniles and adults based on length at 50% maturity. For each haul, calculate the weight of prey eaten by each predator species. We will use information from the size-comp to break down this weight between juvenile and adult. Set this aside for later.
+5. Consider the prey-length data set. For a subset of the fish sampled for diet analysis (which were in turn already a subset of the fish caught in a haul), the length of a subset of the prey items in their stomach is measured. This contains a column named Prey_sz1, which is "An 8.3-digit numeric field that does not allow null values representing the standard length (mm) of fish prey, carapace width (mm) of Majid crabs, or carapace length of Lithodid crabs. This is the primary prey size measurement". Attribute each predator to a life stage (juvenile or adult) based on the size at 50% maturity. Do the same for the prey, where possible (the invertebrates are not spit into life stages for our purposes).
+6. Within each predator, turn the length of each prey item to a weight based on the length-weight relationship $W=a*L^b$.
+7. Group by haul, predator, and life stage, and sum up the weight of each prey species by life stage, and work out the proportions of the prey of each life stage ingested (e.g. adults of this predator in this haul ate 1000 kg of this prey, 20% in juveniles and 80 as adults, by weight).
+8. At this point you should have, for each haul, each species, each life stage, and each prey, a proportion of juvenile and one for adult prey. Use these proportions to correct the prey weights from point 4 in this list, for the respective life stages.
+9. Apply the steps from diet_exploration_atlantis_groups_all_indeces.Rmd to calculate weight-based preference for a prey species, weighted by the number of predators in a haul. Do this 4 times for all the combination of juvenile and adult predators and prey. This should yield four matrices for vertebrates. Biomass pools will only have two matrices. 
+
+Bear in mind that we will not be able to examine all predator-prey combinations from the data. Treat absences as zeroes in this case (e.g. no juvenile cods were found in ATF gut contents? Then ATF only eats adult cods).
+
+```{r}
+library(tidyverse)
+library(viridis)
+library(FishLife)
+library(rfishbase)
+```
+
+```{r}
+select <- dplyr::select
+```
+
+# Read data (1-3)
+
+## REEM data
+
+```{r}
+predator <- read.csv("../data/1_Gulf Of Alaska_RawPP.csv")
+prey_length <- read.csv("../data/1_Gulf Of Alaska_RawPL.csv")
+
+# clean column names
+prey_length <- prey_length %>% set_names(gsub("X.","",colnames(prey_length)))
+
+# drop "Dasycottus setiger(spinyhead sculpin)" since there is one, it is not useful, and it causes issues later due to a typo
+prey_length <- prey_length %>% filter(Pred_name!='Dasycottus setiger(spinyhead sculpin)')
+
+# what species can we carry out this analysis for? The limiting set will be the prey length set. We will need a species list for predator and prey, but take both from the prey set as that is the smallest
+pred_species <- prey_length %>% 
+  rowwise() %>%
+  mutate(Scientific_name = paste(word(Pred_name, 1:2), collapse = ' ')) %>% 
+  ungroup() %>%
+  select(Scientific_name) %>% 
+  distinct() %>% 
+  arrange() %>%
+  mutate(tt = strsplit(Scientific_name, ' ')) %>%
+  rowwise() %>%
+  mutate(Genus = tt[1],
+         Species = tt[2]) %>%
+  select(Genus, Species) %>%
+  drop_na() %>%
+  ungroup()
+
+# prey list is a lot messier 
+prey_species <- prey_length %>% 
+  rowwise() %>%
+  mutate(Prey_Name = str_replace(Prey_Name,'\\(',''),
+         Prey_Name = str_replace(Prey_Name,'\\)',''),
+         Scientific_name = ifelse(str_count(Prey_Name, '\\w+')>1, 
+                                  paste(word(Prey_Name, (str_count(Prey_Name, '\\w+')-1):str_count(Prey_Name, '\\w+')), collapse = ' '),
+                                  Prey_Name)) %>% 
+  ungroup() %>%
+  select(Scientific_name,Prey_nodc) %>% 
+  distinct() %>% 
+  arrange() %>%
+  mutate(tt = strsplit(Scientific_name, ' ')) %>%
+  rowwise() %>%
+  mutate(Genus = tt[1],
+         Species = tt[2]) %>%
+  select(Genus, Species) %>%
+  drop_na() %>%
+  ungroup()
+# all those ending with sp. or with common names will not work, as well as a few other with dashes etc. However, those will likely not have info anyway. There are a lot of invertebrates here too, which will also not work.
+```
+
+## Length at 50% maturity
+
+For the purpose of splitting between juveniles and adults, we use estimates of length at maturity from the `FishLife` [package](https://github.com/James-Thorson-NOAA/FishLife). 
+
+This needs to be done for the predator and prey list both. 
+```{r}
+source('funs_lw_lmat.R')
+
+# add pollock, it still goes by its old name in Fishbase for some reason
+pred_species <- rbind(pred_species, c('Theragra','chalcogramma'))
+prey_species <- rbind(prey_species, c('Theragra','chalcogramma'))
+
+# these are needed in the call to get_lmat
+fl_params <- (FishLife::FishBase_and_RAM$beta_gv) # all species params
+fl_names <- row.names(fl_params)
+fl_covmat <- (FishLife::FishBase_and_RAM$Cov_gvv) # all species variance covariance
+
+lmat_pred <- pred_species %>% 
+  mutate(lmat = purrr::pmap(list(this_genus=Genus,this_species=Species),get_lmat)) %>%
+  unnest(cols = c(lmat), keep_empty = T)
+
+lmat_prey <- prey_species %>% 
+  mutate(lmat = purrr::pmap(list(this_genus=Genus,this_species=Species),get_lmat)) %>%
+  unnest(cols = c(lmat), keep_empty = T)
+```
+
+## Length-weight relationship
+
+Taking parameters from [Froese et al. (2014)](https://doi.org/10.1111/jai.12299). The form of the LW relationship in the Bayesian hierarchical analysis is $W=a*L^b$. I apply their code in `SingleSpeciesLWR_7.R` to obtain mean estimates of log10a and b from Bayesian hierarchical analysis based on (1) priors that are specific to body shape of the fish, and (2) previous studies that act as data to get a posterior distribution of the parameters. Importantly, for these parameters, weight is in grams and length is in centimeters.
+```{r}
+lw_pred <- pred_species %>% 
+  mutate(lw_bayes = purrr::pmap(list(this_genus=Genus,this_species=Species),possibly(apply_Froese,NA))) %>%
+  unnest_wider(col = c(lw_bayes)) %>%
+  set_names(c('Genus','Species','Log10a','b')) %>%
+  mutate(a=10^Log10a) %>% # because the models return log10a, not a
+  select(-Log10a)
+
+lw_prey <- prey_species %>% 
+  mutate(lw_bayes = purrr::pmap(list(this_genus=Genus,this_species=Species),possibly(apply_Froese,NA))) %>%
+  unnest_wider(col = c(lw_bayes)) %>%
+  set_names(c('Genus','Species','Log10a','b')) %>%
+  mutate(a=10^Log10a) %>% # because the models return log10a, not a
+  select(-Log10a)
+```
+
+Join length-weight and length at maturity keys. 
+```{r}
+lw_lmat_pred <- lw_pred %>% 
+  left_join(lmat_pred, by = c('Genus','Species')) %>%
+  drop_na() %>%
+  mutate(Scientific.Name = paste(Genus, Species, sep = ' ')) %>%
+  select(-Genus,-Species)
+
+lw_lmat_prey <- lw_prey %>% 
+  left_join(lmat_prey, by = c('Genus','Species')) %>%
+  drop_na() %>%
+  mutate(Scientific.Name = paste(Genus, Species, sep = ' ')) %>%
+  select(-Genus,-Species)
+
+# restore pollock to the correct name
+lw_lmat_pred$Scientific.Name <- gsub('Theragra chalcogramma','Gadus chalcogrammus',lw_lmat_pred$Scientific.Name)
+lw_lmat_prey$Scientific.Name <- gsub('Theragra chalcogramma','Gadus chalcogrammus',lw_lmat_prey$Scientific.Name)
+```
+
+# The predator set (4)
+
+Point 4. Take the predator set and the predator length at maturity information, and assign each individual to juvenile and adult based on lmat. Then, at haul level, for each life stage of each predator add up the weight of each prey species (pooled regardless of life stage for now).
+```{r}
+assign_stage <- function(Name,Len,lw_lmat){
+  this_lmat <- lw_lmat %>% filter(Scientific.Name == Name) %>% pull(lmat)
+  this_stage <- ifelse(length(this_lmat)==0, 'U', ifelse(Len<this_lmat,'J','A')) # if not possible to assign, use U for undetermined
+  this_stage
+}
+
+predator <- predator %>% 
+  mutate(Pred_stage = purrr::pmap(list(Pred_name,Pred_len),possibly(assign_stage,NA),lw_lmat_pred)) %>%
+  unnest(cols = Pred_stage)
+```
+The predators that do not have a value for A or J are not present as predators in the "pre-length" set. Meaning that none of them has ever been examined for ingested prey length, and we will not be able to identify stage-specific trophic relationships for them.
+
+Group by year, haul, predator name, predator stage, and prey name, and sum up the prey weight ingested in that haul by that predator. Should we correct this by predator weight somehow? Think about this later, but probably yes.
+```{r}
+predator_by_haul <- predator %>%
+  group_by(Year,Hauljoin,Pred_name,Pred_stage) %>%
+  mutate(Npred = length(unique(Pred_specn))) %>% # set up a counter for the n of predators, becomes a property of the haul like the hauljoin field
+  ungroup() %>%
+  group_by(Year,Hauljoin,Npred,Pred_name,Pred_nodc,Pred_stage,Prey_Name,Prey_nodc) %>%
+  summarise(Tot_weight_ingested = sum(Prey_twt))
+```
+Set this aside for later.
+
+# The prey set (5-7)
+
+This is going to be painful to deal with if nothign else for the names, which for some reason are in a different format from the other data set, making a join impossible. Alter the names based on how we extracted species names above.
+
+```{r}
+prey_length1 <- prey_length %>% 
+  rowwise() %>%
+  mutate(Prey_sz_cm = Prey_sz1/10,
+         Pred_name_new = paste(word(Pred_name, 1:2), collapse = ' '),
+         Prey_Name = str_replace(Prey_Name,'\\(',''),
+         Prey_Name = str_replace(Prey_Name,'\\)',''),
+         Prey_name_new =  ifelse(str_count(Prey_Name, '\\w+')>1, 
+                                 paste(word(Prey_Name, (str_count(Prey_Name, '\\w+')-1):str_count(Prey_Name, '\\w+')), collapse = ' '),
+                                 Prey_Name)) %>%
+  ungroup() # NOTE: this returns imperfect names, in instances where the scientific name was not provided / incomplete (see above). Keep an eye on how this propagates
+
+# assign each predator and prey to their stage
+prey_length1 <- prey_length1 %>%
+  mutate(Pred_stage = purrr::pmap(list(Pred_name_new,Pred_len),possibly(assign_stage,NA),lw_lmat_pred),
+         Prey_stage = purrr::pmap(list(Prey_name_new,Prey_sz_cm),possibly(assign_stage,NA),lw_lmat_prey)) %>%
+  unnest(cols = c(Pred_stage, Prey_stage)) 
+```
+
+Turn the length of each prey to a weight with the length-weight key (where possible) and the relationship $W=a*L^b$. Have NA where not possible.
+
+**NOTE**: 
+
+1. I checked the LW curves defined by the a and b parameters that we pull this way and they seem to make sense in terms of unites being cm and g for length and weight, respectively. Important to note that here we use estimates from a meta-analytical approach, as opposed to GOA-specific values from stock assessments etc. This also means that this is at odds with the LW parameters we use to prepare the .prm file for Atlantis, as those are, instead, taken from GOA species. I imagine this will hardly make a difference as diets are theoretical and will need to be calibrate, but it is still  acorner that I am cutting. This applies to the spatial distributions as well. 
+2. There is the potential to obtain very different weights by using a LW relationship compared to what was recorded as weight of the ingested prey. This has two main reasons: (a) the LW relationship is an approximation and the real weight of an individual fish may vary greatly; and (b) a prey item may have been digested. This goes two ways, in that LW may overestimate or underestimate the real weight of ingested prey. For this reason, the LW-calculated weight has the sole purpose of working out proportions of juveniles and adults in the stomach content of a predator. Those weight are not to be used further.
+```{r}
+length_to_weight <- function(Name,Len,lw_lmat){
+  this_a <- lw_lmat %>% filter(Scientific.Name == Name) %>% pull(a)
+  this_b <- lw_lmat %>% filter(Scientific.Name == Name) %>% pull(b)
+  this_w <- this_a*Len^this_b
+  this_w <- ifelse(length(this_w)==0, NA, this_w) # this is to keep the prey items that we do not have LW info for
+  this_w # in g
+}
+
+prey_length2 <- prey_length1 %>%
+  mutate(Prey_wt = purrr::pmap(list(Prey_name_new,Prey_sz_cm),possibly(length_to_weight,NA),lw_lmat_prey)) %>%
+  unnest(cols = Prey_wt)
+```
+
+Group by Year, Hauljoin, predator name, predator stage, prey name, prey stage, and add up the weight of the ingested prey, and the relative proportions of juveniles and adults in that.
+```{r}
+prey_length3 <- prey_length2 %>%
+  group_by(Year, Hauljoin, Pred_name_new, Pred_nodc, Pred_stage, Prey_name_new, Prey_nodc, Prey_stage) %>%
+  summarise(Prey_weight_ingested_stage = sum(Prey_wt)) %>%
+  ungroup() %>%
+  group_by(Year, Hauljoin, Pred_name_new, Pred_nodc, Pred_stage, Prey_name_new, Prey_nodc) %>%
+  mutate(Prey_weight_ingested_total = sum(Prey_weight_ingested_stage),
+         Prop = Prey_weight_ingested_stage/Prey_weight_ingested_total) # get proportion of prey weight for each prey stage by haul
+```
+
+# Break down predator set by proportions (8)
+
+Now we need to tie the proportion information back to the predator data set, and multiply the ingested prey in each haul by the proportion of each prey stage within that haul. Where there is no stage separation for prey, the proportion will be 1, and the amount of prey is not down-scaled. Do this by haul, bearing in mind that only 66% or so of the hauls that have diet data also have prey length data, and that within that hauls that were sampled for prey size only a portion of the individuals were sampled. We are bound to lose information compared to the analysis that did not consider life stages. In addition, do not assume that the sub-sample used for prey size is representative of the entire haul.
+
+We have to join by NODC because names are inconsistent in their format between the predator and prey length sets. Be careful with handling the invertebrates here.
+
+Missing prey stage: if the prey stage is NA, replace it with Undetermined (U). If the proportion for a stahe is NA, replace it with 1. This may hide some bugs but it should correct for the (many) species that do not have life stage information based on length at maturity (e.g. invertebrates of many fish species that are not groundfish).
+```{r}
+hauls_in_common <- intersect(unique(predator$Hauljoin),unique(prey_length$Hauljoin)) # only do this for the hauls that have prey length info
+
+predator_by_stage <- predator_by_haul %>% 
+  filter(Hauljoin %in% hauls_in_common) %>%
+  full_join(prey_length3 %>% select(Year:Prey_stage,Prop), by = c('Year','Hauljoin','Pred_nodc','Pred_stage','Prey_nodc')) %>%
+  rowwise() %>%
+  mutate(Prey_stage = ifelse(is.na(Prey_stage),'U',Prey_stage),
+         Prop = ifelse(is.na(Prop),1,Prop),
+         Prey_ingested_g = Tot_weight_ingested*Prop)
+
+```
+
+# Diet by life stage (9)
+
+Now we take the predator_by_stage set we just created with the ingested prey broken down by life stage, and apply the steps we developed to work out diet proportions. 
+
+Break down this set into 4. Juvenile and adult predators eating juvenile and adult prey. Undetermined stages will appear in both.
+
+Not sure if we are going to need NODC etc. when mapping to Atlantis groups - ditch it for now but may need it back.
+```{r}
+calculate_diet_prop <- function(pred_stage,prey_stage){
+  pred_subset <- predator_by_stage %>% filter(Pred_stage %in% c(pred_stage,'U'), Prey_stage %in% c(prey_stage,'U')) %>% ungroup()
+  
+  # this step is dodgy, but here it goes: turn 'U' to J or A, to match the rest. Rationale: for predators, the results will be identical between juveniles and adults, and this is fine if no other info exists to differentiate. For prey, the value of pPREY will be the same in case of biomass pools or vertebrate prey for which we do not have size information. Bear in mind that you are double-counting all the U prey in this way, once for juvenile predators and once for adult. However, this should be alleviated by the fact that, if a life stage of the predators does not eat a certain biomass pool, this should not show when subsetting by the predator life stage. For example, assume that juvenile cod eats some copepods, and adult cod does not. Copepods are all U, but they should not show up in the adult cod data set, thus their proportion in the diet of adult cod should be 0. 
+  
+  pred_subset <- pred_subset %>% mutate(Pred_stage = str_replace(Pred_stage, 'U', pred_stage),
+                                        Prey_stage = str_replace(Prey_stage, 'U', prey_stage))
+  
+  pred_subset <- pred_subset %>%
+    group_by(Year, Hauljoin, Npred, Pred_name, Prey_Name) %>% 
+    summarize(Prey_ingested_g_1 = sum(Prey_ingested_g)) %>% # this step is because some prey items have same Prey_Name but different NODC, and also to merge U and J or A
+    group_by(Year, Hauljoin, Npred, Pred_name) %>%
+    mutate(Total_ingested_g = sum(Prey_ingested_g_1)) %>% # how much prey (all species) was eaten by pred Y in year Z
+    group_by(Year, Hauljoin, Npred, Pred_name, Prey_Name) %>% 
+    summarize(pcW_stom = ifelse(Total_ingested_g!=0, Prey_ingested_g_1/Total_ingested_g, 0)) %>% # proportion ingested X and total ingested
+    ungroup() %>%
+    complete(Prey_Name, nesting(Year,Hauljoin,Npred,Pred_name), fill = list(pcW_stom=0)) %>% # add zeroes, i.e. the predator had 0 g of prey XXX stage YYY in its stomach
+    mutate(pcW_weighted = pcW_stom*Npred) %>% # multiply the proportions by the number of predators, to give them more weight the more predators there were in a haul
+    group_by(Year, Pred_name) %>%
+    mutate(Tot_pred = sum(pcW_weighted)) %>% # this returns the total number of predators of a species in a year 
+    ungroup() %>%
+    group_by(Pred_name, Prey_Name, Year, Tot_pred) %>% # 
+    summarize(pcW_weighted = sum(pcW_weighted)/Tot_pred) %>% # sum across hauls and divide by total n of predators to have an adjusted (weighted) proportion of a prey in the diet, weighted for the number of fish in each haul
+    distinct()
+  # Something is not right - a check shows that Npred and sum(pcW_weighted) do not always align, which they should do. More specifically, sum(pcW_weighted) always falls short of the sum of Npred, which is super weird considering that the former is cacluated based on the latter and pcW, which never seems to overshoot 1. I cannot seem to find where the problem is - move on for now but possibly there is a bug here. EDIT: it is the stages, but for the life of me I cannot figure out where.
+  
+  # average over all years. Kind of along the same lines, we may want to give different weights to different years here. This may attempt to reflect the number of hauls per year, giving more weight to years that had more hauls, or perhaps we may want to dampen the effect of some atypical years. For now, do a simple mean of the proportion for each predator-prey pair. Reflect on what period you want to use for this. Using fewer years will mean loosing some species. 
+  
+  diet_all_years <- pred_subset %>% 
+    group_by(Pred_name, Prey_Name) %>%
+    summarise(pcW_mean = mean(pcW_weighted, na.rm = TRUE)) 
+  
+  # ditch NaN's, which stem from a predator being recorded but not actually having a number of fished individuals - e.g. capelin (not sure why this happens in the data but there you go)
+  
+  diet_all_years <- diet_all_years[complete.cases(diet_all_years),]
+  
+  check_sum <- diet_all_years %>% group_by(Pred_name) %>% summarise(check = sum(pcW_mean)) %>% ungroup() %>% pull(check) %>% mean()
+  
+  if(check_sum!=1){warning("The diet proportions do not add up to 1")}
+  
+  # make a plot to export
+  p <- diet_all_years %>%
+    mutate(pcW_mean = na_if(pcW_mean,0)) %>%
+    ggplot()+
+    geom_tile(aes(x = Prey_Name, y = Pred_name, fill = pcW_mean), color = "darkgrey")+
+    scale_fill_viridis()+
+    #scale_fill_gradient2(low = "blue", high = "red", midpoint = .5, na.value="grey")+
+    theme_bw()+
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3, size = 12),
+          axis.text.y = element_text(size = 12))+
+    labs(title = paste("Proportion of predator diet (",pred_stage,"predator and",prey_stage,"prey)", sep = " "), 
+         x = "Prey", y = "Predator",
+         fill = "Proportion of ingested prey")
+  
+  ggsave(paste("dietprop_pred",pred_stage,"prey",prey_stage,".png",sep = "_"),p,width = 16, height = 16)
+}
+
+# run the function and make four plots
+calculate_diet_prop('J','J')
+calculate_diet_prop('J','A')
+calculate_diet_prop('A','J')
+calculate_diet_prop('A','A')
+
+# test1 <- test %>%
+#   group_by(Year, Hauljoin, Npred, Pred_name, Pred_stage, Prey_Name, Prey_stage) %>% 
+#   summarize(Prey_ingested_g_1 = sum(Prey_ingested_g)) %>% # this step is because some prey items have same Prey_Name but different NODC, and also to merge U and J or A
+#   group_by(Year, Hauljoin, Npred, Pred_name, Pred_stage) %>%
+#   mutate(Total_ingested_g = sum(Prey_ingested_g_1)) %>% # how much prey (all species) was eaten by pred Y in year Z
+#   group_by(Year, Hauljoin, Npred, Pred_name, Pred_stage, Prey_Name, Prey_stage) %>% 
+#   summarize(pcW_stom = ifelse(Total_ingested_g!=0, Prey_ingested_g_1/Total_ingested_g, 0)) %>% # proportion ingested X and total ingested
+#   ungroup() %>%
+#   complete(Prey_Name, Prey_stage, nesting(Year,Hauljoin,Npred,Pred_name,Pred_stage), fill = list(pcW_stom=0)) %>% # add zeroes, i.e. the predator had 0 g of prey XXX stage YYY in its stomach
+#   mutate(pcW_weighted = pcW_stom*Npred) %>% # multiply the proportions by the number of predators, to give them more weight the more predators there were in a haul
+#   group_by(Year, Pred_name, Pred_stage) %>%
+#   mutate(Tot_pred = sum(pcW_weighted)) %>% # this returns the total number of predators of a species in a year 
+#   ungroup() %>%
+#   group_by(Pred_name, Pred_stage, Prey_Name, Prey_stage, Year, Tot_pred) %>% # 
+#   summarize(pcW_weighted = sum(pcW_weighted)/Tot_pred) %>% # sum across hauls and divide by total n of predators to have an adjusted (weighted) proportion of a prey in the diet, weighted for the number of fish in each haul
+#   distinct()
+```
