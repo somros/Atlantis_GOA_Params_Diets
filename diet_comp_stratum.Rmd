@@ -264,7 +264,7 @@ prey_length3 <- prey_length2 %>%
 
 # Break down predator set by proportions (8)
 
-Now we need to tie the proportion information back to the predator data set, and multiply the ingested prey **in each haul** by the proportion of each prey stage within the **stratum** where that haul is located. Where there is no stage separation for prey, the proportion will be 1, and the amount of prey is not down-scaled. Do this by haul as it is fine enough for our purposes, but bear in mind that previous work has done it by stomach. Importantly, the size-comp information comes from the stratum level, not haul level.
+Now we need to tie the proportion information back to the predator data set, and multiply the ingested prey **in each haul** by the proportion of each prey stage within the **stratum** where that haul is located. Where there is no stage separation for prey, the proportion will be 1, and the amount of prey is not down-scaled. Do this by haul as it is fine enough for our purposes, but bear in mind that previous work has done it by stomach. **Importantly, the size-comp information comes from the stratum level, not haul level**.
 
 We have to join by NODC because names are inconsistent in their format between the predator and prey length sets. Be careful with handling the invertebrates here.
 
@@ -295,9 +295,6 @@ rr <- data.frame(Name.x = 'Raja rhina', Atlantis.group = 'SKL', Nodc = 871304010
 nodc_matching_key <- rbind(nodc_matching_key,rr)
 
 calculate_diet_prop <- function(pred_stage,prey_stage){
-  
-  pred_stage <- 'J' # for testing
-  prey_stage <- 'J'
  
   pred_subset <- predator_by_stage %>% 
     filter(Pred_stage %in% c(pred_stage,'U'), Prey_stage %in% c(prey_stage,'U')) %>% 
@@ -369,6 +366,9 @@ calculate_diet_prop <- function(pred_stage,prey_stage){
   
   if(check_sum!=1){warning("The diet proportions do not add up to 1")}
   
+  # write this out
+  write.csv(diet_all_years,paste("../output/dietprop_pred_stratum_",pred_stage,"prey",prey_stage,".csv",sep = "_"), row.names = F)
+  
   # make a plot to export
   p <- diet_all_years %>%
     mutate(pcW_mean = na_if(pcW_mean,0)) %>%
@@ -383,7 +383,7 @@ calculate_diet_prop <- function(pred_stage,prey_stage){
          x = "Prey", y = "Predator",
          fill = "Proportion of ingested prey")
   
-  ggsave(paste("dietprop_pred_stratum_",pred_stage,"prey",prey_stage,".png",sep = "_"),p,width = 16, height = 12)
+  ggsave(paste("../output/dietprop_pred_stratum_",pred_stage,"prey",prey_stage,".png",sep = "_"),p,width = 16, height = 12)
 }
 
 # run the function and make four plots
