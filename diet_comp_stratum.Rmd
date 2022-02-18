@@ -367,7 +367,7 @@ calculate_diet_prop <- function(pred_stage,prey_stage){
   if(check_sum!=1){warning("The diet proportions do not add up to 1")}
   
   # write this out
-  write.csv(diet_all_years,paste("../output/dietprop_pred_stratum_",pred_stage,"prey",prey_stage,".csv",sep = "_"), row.names = F)
+  write.csv(diet_all_years,paste("../output/REEM/dietprop_stratum_pred",pred_stage,"prey",prey_stage,".csv",sep = "_"), row.names = F)
   
   # make a plot to export
   p <- diet_all_years %>%
@@ -383,7 +383,7 @@ calculate_diet_prop <- function(pred_stage,prey_stage){
          x = "Prey", y = "Predator",
          fill = "Proportion of ingested prey")
   
-  ggsave(paste("../output/dietprop_pred_stratum_",pred_stage,"prey",prey_stage,".png",sep = "_"),p,width = 16, height = 12)
+  ggsave(paste("../output/REEM/dietprop_stratum_pred",pred_stage,"prey",prey_stage,".png",sep = "_"),p,width = 16, height = 12)
 }
 
 # run the function and make four plots
