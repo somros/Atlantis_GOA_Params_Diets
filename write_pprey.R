@@ -2,14 +2,14 @@
 # This code takes output from the diet code and writes out a template for the PPREY matrix for Atlantis GOA
 # As of 2/17/22, we only use REEM diet results and assign to everything else 0 - we will need to fill this
 
-library(dplyr)
+library(tidyverse)
 library(data.table)
 
 # Read data ---------------------------------------------------------------
 
 goa_groups <- read.csv('../data/GOA_Groups.csv', fileEncoding = 'UTF-8-BOM')
 goa_key <- goa_groups %>% select(Code,Name)
-goa_codes <- goa_groups %>% pull(Code)
+goa_codes <- goa_groups %>% pull(Code) # fix DF
 numgroups <- length(goa_codes)
 
 # data from REEM bottom trawl groundfish data
@@ -38,7 +38,7 @@ for (i in 1:length(reem_files)){
     set_names(c('pred','prey','value'))
   
   # complete the combinations to add all functional groups
-  all_codes <- expand.grid(goa_codes,goa_codes) %>%
+  all_codes <- expand.grid(goa_codes,c(goa_codes,"DCsed","DLsed","DRsed")) %>%
     set_names(c('pred','prey'))
   
   all_codes <- all_codes[order(match(all_codes$pred,goa_codes)),] # order them like the groups in Group.csv
@@ -86,7 +86,7 @@ pprey_inverts <- pprey %>% filter(predcode %in% inverts_that_eat) %>%
   select(-name) %>%
   distinct() %>%
   mutate(name=paste0('pPREY',predcode,' ',numgroups)) %>%
-  select(name,KWT:DF)
+  select(name,KWT:DRsed)
 
 # now bind verts and inverts and write them out as a csv
 pprey_all <- pprey_verts %>% select(-predcode) %>%
