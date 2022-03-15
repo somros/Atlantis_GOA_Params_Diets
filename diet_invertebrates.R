@@ -17,9 +17,9 @@ counter <- dat1 %>%
   ungroup()
 
 dat2 <- dat1 %>%
-  mutate(Percent_diet = Percent_diet/100) %>%
+  mutate(Prop_diet = Percent_diet/100) %>%
   left_join(counter, by = "Pred_code") %>%
-  mutate(Weighted_prop = Biomass..t.km2.*Percent_diet) %>%
+  mutate(Weighted_prop = Biomass..t.km2.*Prop_diet) %>%
   group_by(Pred_code,Biom_ag,Prey_code) %>%
   summarise(Diet_comp = sum(Weighted_prop)/Biom_ag) %>%
   ungroup() %>%
@@ -55,3 +55,24 @@ p <- dat3 %>%
 p
 
 ggsave("inverts.png",p,width = 12, height = 8)
+
+# Prepare PPREY for inverts -----------------------------------------------
+
+dat4 <- dat2 %>% select(-Biom_ag)
+
+dat5 <- expand.grid(unique(dat4$Pred_code), ag$Code) %>%
+  as.data.frame() %>%
+  set_names(c('Pred_code','Prey_code')) %>% 
+  full_join(dat4, by = c('Pred_code','Prey_code')) %>%
+  mutate(Diet_comp = replace_na(Diet_comp, 0)) %>%
+  mutate(Diet_comp = Diet_comp/10) %>% # as a starting ballpark, as it was done in CalCurrent to start
+  pivot_wider(names_from = 'Prey_code', values_from = 'Diet_comp') %>%
+  arrange(factor(Pred_code, levels = ag$Code)) %>%
+  mutate(name = paste0('pPREY', Pred_code, ' ', (length(ag$Code)+3))) %>% # +3 because of the detrital sediment
+  select(name, KWT:DR) %>%
+  mutate(DCsed = 1e-09,   # add sediment columns
+         DLsed = 1e-09,
+         DRsed = 1e-09)
+
+# write out
+write.csv(dat5, '../output/inverts_pprey.csv', row.names = F)

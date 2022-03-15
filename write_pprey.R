@@ -1,6 +1,5 @@
 # 2/17/2022 Alberto Rovellini
 # This code takes output from the diet code and writes out a template for the PPREY matrix for Atlantis GOA
-# As of 2/17/22, we only use REEM diet results and assign to everything else 0 - we will need to fill this
 
 library(tidyverse)
 library(data.table)
@@ -45,7 +44,7 @@ for (i in 1:length(reem_files)){
   
   all_pprey <- all_codes %>%
     left_join(this_reem, by=c('pred','prey')) %>%
-    mutate(value=value/1000, # first approximation to get pPREY from diet proportion preferences
+    mutate(value=value/10, # first approximation to get pPREY from diet proportion preferences
            value=replace_na(value,1e-9)) # using a small number as fillvalue for now - TODO change this
   
   all_pprey_wide <- all_pprey %>% pivot_wider(names_from = prey, values_from = value)
@@ -54,7 +53,7 @@ for (i in 1:length(reem_files)){
                                                           pred,
                                                           gsub('.*XXX','',this_pprey),
                                                           ' ',
-                                                          numgroups)) %>%
+                                                          numgroups+3)) %>% #+3 because of the detrital sediment
     set_names(c('name',colnames(all_pprey_wide)[-1]))
   
   reem_list[[i]] <- all_pprey_wide
@@ -62,7 +61,6 @@ for (i in 1:length(reem_files)){
 
 pprey <- rbindlist(reem_list)
 
-# Polish the matrix -------------------------------------------------------
 # sort it in the correct order for readability
 pprey <- pprey %>% mutate(predcode = substr(name,7,(nchar(name)-4)),
                           preystage = substr(name,6,6),
@@ -77,19 +75,33 @@ inverts <- goa_groups %>%
 
 pprey_verts <- pprey %>% filter(predcode %in% setdiff(goa_codes,inverts))
 
-# collapse the invert rows to one row per group - and get rid of detritus and primary producers
+# Invertebrates -----------------------------------------------------------
+pprey_inverts <- read.csv('../output/inverts_pprey.csv')
+
+pprey_inverts <- pprey_inverts %>%
+  mutate(predcode = substr(name, 6, 8))
+
+# drop blanks from predcode column
+pprey_inverts$predcode <- gsub(' ', '', pprey_inverts$predcode)
+
+# check what inverts we are missing from Ecopath
 inverts_that_eat <- goa_groups %>% 
   filter(GroupType %in% setdiff(goa_groups$GroupType, c('FISH','MAMMAL','BIRD','SHARK','PHYTOBEN','LG_PHY','SM_PHY','SED_BACT','PL_BACT','CARRION','LAB_DET','REF_DET'))) %>%
   pull(Code)
 
-pprey_inverts <- pprey %>% filter(predcode %in% inverts_that_eat) %>%
-  select(-name) %>%
-  distinct() %>%
-  mutate(name=paste0('pPREY',predcode,' ',numgroups)) %>%
-  select(name,KWT:DRsed)
+missing <- setdiff(inverts_that_eat, pprey_inverts$predcode) # missing "BG" "BO" "ZM" "ZS"
+
+# add missing inverts
+
+pprey_missing_inverts <- data.frame('name'=paste0('pPREY', missing, ' ', numgroups+3),
+                                    matrix(1e-09, nrow = 1, ncol = numgroups+3)) %>%
+  mutate(predcode = substr(name, 6, 7)) %>%
+  set_names(colnames(pprey_inverts))
+
+# Bind all -------------------------------------------------------
 
 # now bind verts and inverts and write them out as a csv
-pprey_all <- pprey_verts %>% select(-predcode) %>%
-  rbind(pprey_inverts)
+pprey_all <- rbind(pprey_verts, pprey_inverts, pprey_missing_inverts) %>%
+  select(-predcode)
 
 write.csv(pprey_all,'../output/goa_pprey_matrix.csv',row.names = F)
