@@ -1,6 +1,13 @@
-# invertebrates diet
+# Alberto Rovellini
+# March 25 2022
 
-library(googlesheets4)
+# Diets part 3: Diet preferences for invertebrates from Ecopath
+
+# This code reads invertebrate diets information from Aydin et al. (2007) and wriets out the lines of the PPREY matrix
+# for the inverts
+
+# TODO: drop mesozooplankton and EUP as we are taking those from NPZ
+
 library(tidyverse)
 library(viridis)
 
@@ -68,6 +75,7 @@ dat5 <- expand.grid(unique(dat4$Pred_code), ag$Code) %>%
   mutate(Diet_comp = Diet_comp/10) %>% # as a starting ballpark, as it was done in CalCurrent to start
   pivot_wider(names_from = 'Prey_code', values_from = 'Diet_comp') %>%
   arrange(factor(Pred_code, levels = ag$Code)) %>%
+  filter(Pred_code != 'EUP', Pred_code != 'ZM') %>% # dropping EUP and ZM because we do those from NPZ
   mutate(name = paste0('pPREY', Pred_code, ' ', (length(ag$Code)+3))) %>% # +3 because of the detrital sediment
   select(name, KWT:DR) %>%
   mutate(DCsed = 1e-09,   # add sediment columns
