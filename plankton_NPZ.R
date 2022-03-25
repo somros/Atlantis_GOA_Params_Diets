@@ -1,5 +1,8 @@
 # Alberto Rovellini
 # March 25 2022
+
+# Diets Part 4: Diet preferences for plankton from NPZ
+
 # This code takes plankton diet preferences from Coyle et al. (2019) - which is an NPZ model for the GOA 
 # The code writes out the rows of the pprey matrix for ZM, ZS, and EUP. Those will then be processed by write_pprey.R
 
