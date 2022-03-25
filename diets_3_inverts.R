@@ -78,9 +78,9 @@ dat5 <- expand.grid(unique(dat4$Pred_code), ag$Code) %>%
   filter(Pred_code != 'EUP', Pred_code != 'ZM') %>% # dropping EUP and ZM because we do those from NPZ
   mutate(name = paste0('pPREY', Pred_code, ' ', (length(ag$Code)+3))) %>% # +3 because of the detrital sediment
   select(name, KWT:DR) %>%
-  mutate(DCsed = 1e-09,   # add sediment columns
-         DLsed = 1e-09,
-         DRsed = 1e-09)
+  mutate(DCsed = 0,   # add sediment columns
+         DLsed = 0,
+         DRsed = 0)
 
 # write out
 write.csv(dat5, '../output/inverts_pprey.csv', row.names = F)

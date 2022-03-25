@@ -183,13 +183,13 @@ diet_species_and_stage1 <- diet_species_and_stage %>%
 
 temp <- expand.grid(Prey_name = fg$Name, Prey_stage = c('J','A'), Pred_name = key$Pred_name, Pred_stage = c('J','A'))
 
-test <- temp %>% 
+pprey_goaierp <- temp %>% 
   left_join(diet_species_and_stage1, by = c('Pred_name','Pred_stage','Prey_name')) %>%
   left_join(fg, by = c('Pred_name'='Name')) %>% # add code for predator
   arrange(factor(Code,levels = fg$Code), Prey_stage) %>%
   rowwise() %>%
   mutate(Prop = ifelse(Prey_name %in% to_drop & Pred_stage=='J' & Prey_stage == 'A', 0, Prop)) %>% #ASSUMPTION: if the pred stage is J, set to 0 the proportion of adult vertebrate prey that they eat
-  mutate(pprey = ifelse(Prey_stage=='J' & Pred_stage=='J', 
+  mutate(name = ifelse(Prey_stage=='J' & Pred_stage=='J', 
                         paste0('pPREY1',Code,'1 ', (nrow(fg)+3)), 
                                ifelse(Prey_stage=='J' & Pred_stage=='A', 
                                       paste0('pPREY1',Code,'2 ', (nrow(fg)+3)), 
@@ -197,8 +197,15 @@ test <- temp %>%
                                               paste0('pPREY2',Code,'1 ', (nrow(fg)+3)), 
                                               paste0('pPREY2',Code,'2 ', (nrow(fg)+3)))))) %>% # add pPREY column
   left_join(fg, by = c('Prey_name'='Name')) %>%
-  select(pprey,Code.y,Prop) %>% # keep pPREY, prey code, and value
+  select(name,Code.y,Prop) %>% # keep pPREY, prey code, and value
   mutate(Prop = replace_na(Prop,0)) %>%
-  pivot_wider(names_from = Code.y, values_from = Prop)
+  pivot_wider(names_from = Code.y, values_from = Prop) %>%
+  mutate(DCsed = 0, 
+         DLsed = 0, 
+         DRsed = 0)
 ```
 
+Write out.
+```{r}
+write.csv(pprey_goaierp, '../output/goaierp_pprey.csv', row.names = F)
+```

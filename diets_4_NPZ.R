@@ -58,11 +58,14 @@ plankton4 <- plankton3 %>%
 pprey_plankton <- expand.grid(unique(plankton4$pred), fg$Code) %>% 
   set_names(c('pred','prey')) %>%
   left_join(plankton4, by = c('pred','prey')) %>%
-  mutate(prop = replace_na(prop, 0)) %>%
+  mutate(prop = replace_na(prop, 0),
+         prop = prop/10) %>% # initial estimate like in CalCUrrent
   pivot_wider(names_from = prey, values_from = prop) %>%
-  mutate(DCSed = 0, DLSed = 0, DRSed = 0, #add columns for detritus
+  mutate(DCsed = 0, 
+         DLsed = 0, 
+         DRsed = 0, #add columns for detritus
          name = paste0('pPREY',pred,' ',81)) %>% 
-  select(name,KWT:DRSed)
+  select(name,KWT:DRsed)
   
 # write out
 write.csv(pprey_plankton, '../output/plankton_pprey.csv', row.names = F)

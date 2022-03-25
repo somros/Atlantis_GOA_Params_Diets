@@ -1,5 +1,9 @@
 # 2/17/2022 Alberto Rovellini
+
+# Diets Part 5: bring it all together and write PPREY
+
 # This code takes output from the diet code and writes out a template for the PPREY matrix for Atlantis GOA
+# still missing birds and mammals here
 
 library(tidyverse)
 library(data.table)
@@ -45,7 +49,7 @@ for (i in 1:length(reem_files)){
   all_pprey <- all_codes %>%
     left_join(this_reem, by=c('pred','prey')) %>%
     mutate(value=value/10, # first approximation to get pPREY from diet proportion preferences
-           value=replace_na(value,1e-9)) # using a small number as fillvalue for now - TODO change this
+           value=replace_na(value,0)) # assuming that NA is 0
   
   all_pprey_wide <- all_pprey %>% pivot_wider(names_from = prey, values_from = value)
   
@@ -75,6 +79,17 @@ inverts <- goa_groups %>%
 
 pprey_verts <- pprey %>% filter(predcode %in% setdiff(goa_codes,inverts))
 
+# drop salmon and herring as we will add them with GOAIERP
+to_drop <- c('SCH','SCO','SPI','SCM','SSO','HER')
+
+pprey_verts <- pprey_verts %>%
+  filter(predcode %in% setdiff(goa_codes, to_drop)) 
+
+# GOAIERP salmon and herring ----------------------------------------------
+
+pprey_goaierp <- read.csv('../output/goaierp_pprey.csv') %>%
+  mutate(predcode = substr(name,7,(nchar(name)-4)))
+
 # Invertebrates -----------------------------------------------------------
 pprey_inverts <- read.csv('../output/inverts_pprey.csv')
 
@@ -84,24 +99,46 @@ pprey_inverts <- pprey_inverts %>%
 # drop blanks from predcode column
 pprey_inverts$predcode <- gsub(' ', '', pprey_inverts$predcode)
 
+# drop EUP from these because we enter them from NPZ
+pprey_inverts <- pprey_inverts %>%
+  filter(predcode != 'EUP')
+
 # check what inverts we are missing from Ecopath
 inverts_that_eat <- goa_groups %>% 
   filter(GroupType %in% setdiff(goa_groups$GroupType, c('FISH','MAMMAL','BIRD','SHARK','PHYTOBEN','LG_PHY','SM_PHY','SED_BACT','PL_BACT','CARRION','LAB_DET','REF_DET'))) %>%
   pull(Code)
 
-missing <- setdiff(inverts_that_eat, pprey_inverts$predcode) # missing "BG" "BO" "ZM" "ZS"
+setdiff(inverts_that_eat, pprey_inverts$predcode)
+# missing "BG"  "BO"  "EUP" "ZM"  "ZS", but we do the last 3 from NPZ 
+missing <- c('BG','BO')
 
-# add missing inverts
+# add missing inverts - we will need to fill these manually in PPREY
 
 pprey_missing_inverts <- data.frame('name'=paste0('pPREY', missing, ' ', numgroups+3),
-                                    matrix(1e-09, nrow = 1, ncol = numgroups+3)) %>%
+                                    matrix(0, nrow = 1, ncol = numgroups+3)) %>%
   mutate(predcode = substr(name, 6, 7)) %>%
   set_names(colnames(pprey_inverts))
 
+# Plankton from NPZ -------------------------------------------------------
+pprey_plankton <- read.csv('../output/plankton_pprey.csv') 
+
+pprey_plankton <- pprey_plankton %>%
+  mutate(predcode = substr(name, 6, 8))
+
+# drop blanks from predcode column
+pprey_plankton$predcode <- gsub(' ', '', pprey_plankton$predcode)
+
 # Bind all -------------------------------------------------------
 
-# now bind verts and inverts and write them out as a csv
-pprey_all <- rbind(pprey_verts, pprey_inverts, pprey_missing_inverts) %>%
-  select(-predcode)
+# now bind everything together, reorder them, and and write them out as a csv
+pprey_all <- rbind(pprey_verts, pprey_goaierp, pprey_inverts, pprey_missing_inverts, pprey_plankton) %>%
+  arrange(factor(predcode, levels = goa_codes))
+
+# as a cheat, still keep a small value for birds, fish, and large sharks until we address their diets (probably manually)
+# TODO: fix this
+these <- c((goa_groups %>% filter(GroupType %in% c('BIRD','MAMMAL')) %>% pull(Code)), c('SHP','SHD'))
+pprey_all[pprey_all$predcode %in% these,2:82] <- 1e-9
+
+pprey_all <- pprey_all %>% select(-predcode)
 
 write.csv(pprey_all,'../output/goa_pprey_matrix.csv',row.names = F)
