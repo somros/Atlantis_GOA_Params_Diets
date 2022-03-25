@@ -1,5 +1,5 @@
 ---
-title: "Ontogenetic diet preferences - Atlantis groups"
+title: "Diets Part 1: Ontogenetic diet preferences from REEM"
 author: "Alberto Rovellini"
 date: "1/12/2022"
 output:
@@ -11,9 +11,13 @@ output:
 
 # Purpose
 
-Here, we calculate weight-based diet preferences of GOA predators based on bottom trawl data. This document attempts to characterize ontogenetic preferences based on size at 50% maturity. The workflow is as follows:
+Here, we calculate weight-based diet preferences of GOA predators based on bottom trawl data. This document characterizes ontogenetic preferences based on size at 50% maturity. Data is diet data from the REEM group [available here](https://apps-afsc.fisheries.noaa.gov/refm/reem/webdietdata/dietdataintro.php).
 
-1. Read in the diet and prey length data from  REEM (see links above).
+The goal is to define generic diet prefernces for each species, to be used as PPREY entries in Atlantis GOA. We use diet data from 1990 to 2013 to avoid capturing the heath wave, when diets shifted substantially. Remember, these will only be the initial, pre-calibration diet preferences in Atlantis.
+
+The workflow is as follows:
+
+1. Read in the diet and prey length data from  REEM.
 2. Read in information on size at 50% maturity for each (fish) species, pulling from FishLife.
 3. Read in information on length-weight relationships, pulling from Froese et al. (2014).
 4. Consider the predator data set. Assign all predator individuals (that we can based on available lmat) to juveniles and adults based on length at 50% maturity. Then at haul level, for predator $i$ and prey $j$, calculate the weight of $j$ eaten by $i$. Set this aside for later. We will use information from the stage composition calculated below to break down the weight of $j$ between juveniles and adults. 
@@ -51,8 +55,8 @@ prey_length <- prey_length %>% set_names(gsub("X.","",colnames(prey_length)))
 prey_length <- prey_length %>% filter(Pred_name!='Dasycottus setiger(spinyhead sculpin)')
 
 # limit to 1990 onward - older data is tricky
-predator <- predator %>% filter(Year>=1990)
-prey_length <- prey_length %>% filter(Year>=1990)
+predator <- predator %>% filter(between(Year, 1990, 2011)) # leaving out the heat wave years
+prey_length <- prey_length %>% filter(between(Year, 1990, 2011)) # leaving out the heat wave years
 
 # read in haul information
 hauls <- read.csv("../data/Haul Descriptions.csv", fileEncoding = "UTF-8-BOM")
@@ -68,7 +72,7 @@ prey_length <- prey_length %>%
   filter(!is.na(Stratum))
 ```
 
-What species can we carry out this analysis for? The limiting set will be the prey length set. We will need a species list for predator and prey, but take both from the prey set as that is the smallest.
+What species can we carry out the size structure analysis for? The limiting set will be the prey length set. We will need a species list for predator and prey, but take both from the prey set as that is the smallest.
 ```{r}
 pred_species <- prey_length %>% 
   rowwise() %>%
@@ -187,7 +191,7 @@ predator <- predator %>%
 ```
 The predators that do not have a value for A or J are not present as predators in the "prey_length" set. Meaning that none of them has ever been examined for ingested prey length, and we will not be able to identify stage-specific trophic relationships for them.
 
-Set up a counter for the n of predators with a non-empty stomach in each haul. This becomes a property of the haul like the hauljoin field and it will be used later to weight diet comp proportions between hauls based on the number of stomachs in a haul, in such a way that hauls containing more samples are given more importance. Then group the predator set by year, haul (with stratum), predator name, predator stage, and prey name, and sum up the prey weight ingested in that haul by that predator. 
+Set up a counter for the n of predators with a non-empty stomach in each haul. This becomes a property of the haul like the hauljoin field and it will be used later to weight diet comp proportions between hauls based on the number of stomachs in a haul, in such a way that hauls containing more samples are given more importance. Then group the predator set by year, haul (with stratum), predator name, **predator stage**, and prey name, and sum up the prey weight ingested in that haul by that predator. 
 ```{r}
 stomach_counter <- predator %>%
   filter(Pred_stomwt>0) %>% # use only non-empty stomachs
@@ -268,7 +272,7 @@ Now we need to tie the proportion information back to the predator data set, and
 
 We have to join by NODC because names are inconsistent in their format between the predator and prey length sets. Be careful with handling the invertebrates here.
 
-Missing prey stage: if the prey stage is NA, replace it with Undetermined (U). If the proportion for a stage is NA, replace it with 1. This may hide some bugs but it should correct for the (many) species that do not have life stage information based on length at maturity (e.g. invertebrates of many fish species that are not groundfish).
+Missing prey stage: if the prey stage is `NA`, replace it with Undetermined (U). If the proportion for a stage is `NA`, replace it with 1. This may hide some bugs but it should correct for the (many) species that do not have life stage information based on length at maturity (e.g. invertebrates of many fish species that are not groundfish).
 ```{r}
 predator_by_stage <- predator_by_haul %>% 
   full_join(prey_length3 %>% select(Year:Prey_stage,Prop), by = c('Year','Stratum','Pred_nodc','Pred_stage','Prey_nodc')) %>%
@@ -281,7 +285,7 @@ predator_by_stage <- predator_by_haul %>%
 
 # Diet by life stage (9)
 
-Now we take the predator_by_stage set we just created with the ingested prey broken down by life stage, and apply the steps we developed to work out diet proportions. Before doing so, we map predators and prey species to their respective Atlantis groups by means of the NODC key. Then we need to group as appropriate (remember to maintain the stages here).
+Now we take the `predator_by_stage` set we just created with the ingested prey broken down by life stage, and apply the steps we developed to work out diet proportions. Before doing so, we map predators and prey species to their respective Atlantis groups by means of the NODC key. Then we need to group as appropriate (remember to maintain the stages here).
 
 **NOTE**: here, we go back to haul level. The only step that gets done at stratum level is the stage composition of the prey. Note that using diet data at haul level may still present issues of representativeness of the sub-sample opened for prey size comp.
 
@@ -367,7 +371,7 @@ calculate_diet_prop <- function(pred_stage,prey_stage){
   if(check_sum!=1){warning("The diet proportions do not add up to 1")}
   
   # write this out
-  write.csv(diet_all_years,paste("../output/REEM/dietprop_stratum_pred",pred_stage,"prey",prey_stage,".csv",sep = "_"), row.names = F)
+  write.csv(diet_all_years,paste("../output/REEM/dietprop_stratum_pred_",pred_stage,"_prey",prey_stage,".csv",sep = ""), row.names = F)
   
   # make a plot to export
   p <- diet_all_years %>%
@@ -383,7 +387,7 @@ calculate_diet_prop <- function(pred_stage,prey_stage){
          x = "Prey", y = "Predator",
          fill = "Proportion of ingested prey")
   
-  ggsave(paste("../output/REEM/dietprop_stratum_pred",pred_stage,"prey",prey_stage,".png",sep = "_"),p,width = 16, height = 12)
+  ggsave(paste("../output/REEM/dietprop_stratum_pred_",pred_stage,"_prey",prey_stage,".png",sep = ""),p,width = 16, height = 12)
 }
 
 # run the function and make four plots
