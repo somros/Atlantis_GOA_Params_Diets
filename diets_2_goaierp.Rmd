@@ -27,6 +27,7 @@ This document calculates diet proportions for juvenile salmon in the GOA, from G
 Read the data. Data consists of a CSV table with data from 2015-2016 or so and a database with data from (2001-2003). Let's start from the CSV, the formats are different so we will need slightly different code.
 ```{r}
 dat <- read_excel('../data/GOAIERP/2015-2016 EGOA Diets.xlsx')
+fg <- read.csv('../data/GOA_Groups.csv') %>% select(Code,Name)
 ```
 
 Let's get a sense of how many animals this is based on. 
@@ -156,3 +157,48 @@ ggsave('goaierp.png',p,width = 12, height = 8)
 # Older data
 
 There is an older database with some salmon diet data, but it is not useful because there are no metadata or connections in the database to explain the life history stages, the species codes, etc. A shame, because it is almost 5000 rows of data only on salmon, but this version does not seem to be complete. May follow up with Jamal about this one, for now use only the 2015-2016 data.
+
+# Make pPREY rows for salmon and herring
+
+This data does not have prey length information, so we make assumptions. There will need to be some assumptions for what stages are eaten by juveniles and adults. In particular, juvenile predators will not be able to eat adult groundfish prey. As a reminder of how this works:
+
+pPREY1XXX1 : J prey and J predator
+pPREY1XXX2 : J prey and A predator
+pPREY2XXX1 : A prey and J predator
+pPREY2XXX2 : A prey and A predator
+
+Start from making a key for the predators to Atlantis groups. Then build the pPREY matrix. 
+```{r}
+key <- data.frame('sp'=these_species,'Pred_name'=c('Salmon_chinook','Salmon_chum','Salmon_coho','Salmon_pink','Salmon_sockeye','Herring'))
+
+# get groundfish groups to discard the adults of from the juvenile diets
+unique(diet_species_and_stage$Prey_name)
+
+to_drop <- c('Arrowtooth_flounder','Deep_demersal','Flatfish_deep','Flatfish_shallow','Halibut','Pollock','Rex_sole','Sablefish','Salmon_pink','Shallow_demersal')
+
+diet_species_and_stage1 <- diet_species_and_stage %>%
+  left_join(key, by = c('CommonName'='sp')) %>%
+  select(Pred_name,Pred_LHS,Prey_name,MeanProp) %>%
+  set_names(c('Pred_name','Pred_stage','Prey_name','Prop'))
+
+temp <- expand.grid(Prey_name = fg$Name, Prey_stage = c('J','A'), Pred_name = key$Pred_name, Pred_stage = c('J','A'))
+
+test <- temp %>% 
+  left_join(diet_species_and_stage1, by = c('Pred_name','Pred_stage','Prey_name')) %>%
+  left_join(fg, by = c('Pred_name'='Name')) %>% # add code for predator
+  arrange(factor(Code,levels = fg$Code), Prey_stage) %>%
+  rowwise() %>%
+  mutate(Prop = ifelse(Prey_name %in% to_drop & Pred_stage=='J' & Prey_stage == 'A', 0, Prop)) %>% #ASSUMPTION: if the pred stage is J, set to 0 the proportion of adult vertebrate prey that they eat
+  mutate(pprey = ifelse(Prey_stage=='J' & Pred_stage=='J', 
+                        paste0('pPREY1',Code,'1 ', (nrow(fg)+3)), 
+                               ifelse(Prey_stage=='J' & Pred_stage=='A', 
+                                      paste0('pPREY1',Code,'2 ', (nrow(fg)+3)), 
+                                      ifelse(Prey_stage=='A' & Pred_stage=='J', 
+                                              paste0('pPREY2',Code,'1 ', (nrow(fg)+3)), 
+                                              paste0('pPREY2',Code,'2 ', (nrow(fg)+3)))))) %>% # add pPREY column
+  left_join(fg, by = c('Prey_name'='Name')) %>%
+  select(pprey,Code.y,Prop) %>% # keep pPREY, prey code, and value
+  mutate(Prop = replace_na(Prop,0)) %>%
+  pivot_wider(names_from = Code.y, values_from = Prop)
+```
+
