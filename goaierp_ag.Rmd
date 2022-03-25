@@ -1,8 +1,12 @@
 ---
-title: "GOAIERP diet data"
+title: "Diets Part 2: Diet preferences from GOAIERP"
 author: "Alberto Rovellini"
 date: "1/11/2022"
-output: html_document
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
 ---
 
 ```{r setup, include=FALSE}
