@@ -1,9 +1,8 @@
 # 2/17/2022 Alberto Rovellini
 
-# Diets Part 5: bring it all together and write PPREY
+# Diets Part 8: bring it all together and write PPREY
 
 # This code takes output from the diet code and writes out a template for the PPREY matrix for Atlantis GOA
-# still missing birds and mammals here
 
 library(tidyverse)
 library(data.table)
@@ -79,8 +78,15 @@ inverts <- goa_groups %>%
 
 pprey_verts <- pprey %>% filter(predcode %in% setdiff(goa_codes,inverts))
 
-# drop salmon and herring as we will add them with GOAIERP
-to_drop <- c('SCH','SCO','SPI','SCM','SSO','HER')
+# drop: 
+# salmon and herring as we will add them with GOAIERP
+# mammals and sharks as we will de them from other sources
+# seabirds
+
+to_drop <- c('SCH','SCO','SPI','SCM','SSO','HER',
+             'KWT','WHT','KWR','DOL','WHG','WHH','WHB','SSL','PIN',
+             'BDF','BDI','BSF','BSI',
+             'SHD','SHP')
 
 pprey_verts <- pprey_verts %>%
   filter(predcode %in% setdiff(goa_codes, to_drop)) 
@@ -128,17 +134,51 @@ pprey_plankton <- pprey_plankton %>%
 # drop blanks from predcode column
 pprey_plankton$predcode <- gsub(' ', '', pprey_plankton$predcode)
 
+# Mammals and sharks ------------------------------------------------------
+pprey_mammals_and_sharks <- read.csv('../output/mammals_sharks_pprey.csv') 
+
+pprey_mammals_and_sharks <- pprey_mammals_and_sharks %>%
+  mutate(predcode = substr(name, 7, 9))
+
+# drop blanks from predcode column
+pprey_mammals_and_sharks$predcode <- gsub(' ', '', pprey_mammals_and_sharks$predcode)
+
+# Seabirds ----------------------------------------------------------------
+pprey_seabirds <- read.csv('../output/seabirds_pprey.csv') 
+
+pprey_seabirds <- pprey_seabirds %>%
+  mutate(predcode = substr(name, 7, 9))
+
+# drop blanks from predcode column
+pprey_seabirds$predcode <- gsub(' ', '', pprey_seabirds$predcode)
+
+# Steller sea lions -------------------------------------------------------
+pprey_ssl <- read.csv('../output/ssl_pprey.csv') 
+
+pprey_ssl <- pprey_ssl %>%
+  mutate(predcode = substr(name, 7, 9))
+
+# drop blanks from predcode column
+pprey_ssl$predcode <- gsub(' ', '', pprey_ssl$predcode)
+
 # Bind all -------------------------------------------------------
 
 # now bind everything together, reorder them, and and write them out as a csv
-pprey_all <- rbind(pprey_verts, pprey_goaierp, pprey_inverts, pprey_missing_inverts, pprey_plankton) %>%
+pprey_all <- rbind(pprey_verts, 
+                   pprey_goaierp, 
+                   pprey_inverts, 
+                   pprey_missing_inverts, 
+                   pprey_plankton,
+                   pprey_mammals_and_sharks,
+                   pprey_seabirds,
+                   pprey_ssl) %>%
   arrange(factor(predcode, levels = goa_codes))
 
-# as a cheat, still keep a small value for birds, fish, and large sharks until we address their diets (probably manually)
-# TODO: fix this
-these <- c((goa_groups %>% filter(GroupType %in% c('BIRD','MAMMAL')) %>% pull(Code)), c('SHP','SHD'))
-pprey_all[pprey_all$predcode %in% these,2:82] <- 1e-9
-
+# # as a cheat, still keep a small value for birds, fish, and large sharks until we address their diets (probably manually)
+# # TODO: fix this
+# these <- c((goa_groups %>% filter(GroupType %in% c('BIRD','MAMMAL')) %>% pull(Code)), c('SHP','SHD'))
+# pprey_all[pprey_all$predcode %in% these,2:82] <- 1e-9
+# 
 pprey_all <- pprey_all %>% select(-predcode)
 
 write.csv(pprey_all,'../output/goa_pprey_matrix.csv',row.names = F)
