@@ -61,7 +61,7 @@ pprey_seabirds <- expand.grid(Pred = unique(dat1$Pred), Prey = fg$Code) %>%
   left_join(dat1, by = c('Pred','Prey')) %>%
   mutate(Prop = replace_na(Prop, 0)) %>%
   arrange(factor(Pred, levels = fg$Code)) %>%
-  mutate(Prop = Prop/10) %>%
+  mutate(Prop = Prop/10) %>% # divide by 10 as starting point
   pivot_wider(names_from = Prey, values_from = Prop) %>%
   slice(rep(1:n(), each = 4)) %>% # replicate 4 times (no ontogenetic preferences for now)
   mutate(DCsed = 0,
