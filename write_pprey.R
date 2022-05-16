@@ -181,4 +181,30 @@ pprey_all <- rbind(pprey_verts,
 # 
 pprey_all <- pprey_all %>% select(-predcode)
 
+# we are missing capelin, sandlace, BG, BO
+# From Aydin et al. (2007): "Sand lance diet composition information was unavailable for the GOA, so a similar diet composition of 90% euphausiids and 10% copepods was applied to this group as was assumed for all species of small pelagic forage fish"
+# This applies to both. We do the same here except we add large zooplankton (not a group in Ecopath)
+# and redistribute, as a first pass, 80% EUP, 10% ZL, 10% ZM
+# For benthic grazers assume: 30% PL, 30% MA, 20% BB, 10% DLsed, 10% DCsed
+# For meiobenthos assume: 70% BB, 10% DLsed, 10% DCsed, 10% DRsed
+#Capelin
+pprey_all[grep('CAP',pprey_all$name),]$EUP <- 0.8/10
+pprey_all[grep('CAP',pprey_all$name),]$ZL <- 0.1/10
+pprey_all[grep('CAP',pprey_all$name),]$ZM <- 0.1/10
+#Sandlance
+pprey_all[grep('SAN',pprey_all$name),]$EUP <- 0.8/10
+pprey_all[grep('SAN',pprey_all$name),]$ZL <- 0.1/10
+pprey_all[grep('SAN',pprey_all$name),]$ZM <- 0.1/10
+#BG
+pprey_all[grep('BG',pprey_all$name),]$PL <- 0.3/10
+pprey_all[grep('BG',pprey_all$name),]$MA <- 0.3/10
+pprey_all[grep('BG',pprey_all$name),]$BB <- 0.2/10
+pprey_all[grep('BG',pprey_all$name),]$DLsed <- 0.1/10
+pprey_all[grep('BG',pprey_all$name),]$DCsed <- 0.1/10
+#BO
+pprey_all[grep('BO',pprey_all$name),]$BB <- 0.7/10
+pprey_all[grep('BO',pprey_all$name),]$DLsed <- 0.1/10
+pprey_all[grep('BO',pprey_all$name),]$DCsed <- 0.1/10
+pprey_all[grep('BO',pprey_all$name),]$DRsed <- 0.1/10
+
 write.csv(pprey_all,'../output/goa_pprey_matrix.csv',row.names = F)

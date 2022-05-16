@@ -73,4 +73,4 @@ pprey_seabirds <- expand.grid(Pred = unique(dat1$Pred), Prey = fg$Code) %>%
   select(name, KWT:DRsed)
 
 # write out
-write.csv(pprey_mammals_sharks, '../output/seabirds_pprey.csv', row.names = F)
+write.csv(pprey_seabirds, '../output/seabirds_pprey.csv', row.names = F)

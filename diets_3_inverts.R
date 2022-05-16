@@ -12,30 +12,35 @@ library(tidyverse)
 library(viridis)
 
 dat <- read.csv("../data/inverts.csv")
+dat[is.na(dat)]<-0 # fill the blanks left by Excel
 
 # turn to long format
-dat1 <- dat %>% pivot_longer(cols = BB:ZM, names_to = "Prey_code", values_to = "Percent_diet")
+dat1 <- dat %>% pivot_longer(cols = BB:BO, names_to = "Prey_code", values_to = "Percent_diet")
 
 # group by atlantis code and take average of percentages - need to weight by biomass though
 counter <- dat1 %>% 
-  select(Pred_code,Biomass..t.km2.) %>% 
+  select(Pred_code,Pred_biomass) %>% 
   distinct() %>% group_by(Pred_code) %>% 
-  summarise(Biom_ag = sum(Biomass..t.km2.)) %>% 
+  summarise(Pred_biomass_ag = sum(Pred_biomass)) %>% 
   ungroup()
 
 dat2 <- dat1 %>%
   mutate(Prop_diet = Percent_diet/100) %>%
   left_join(counter, by = "Pred_code") %>%
-  mutate(Weighted_prop = Biomass..t.km2.*Prop_diet) %>%
-  group_by(Pred_code,Biom_ag,Prey_code) %>%
-  summarise(Diet_comp = sum(Weighted_prop)/Biom_ag) %>%
+  mutate(Weighted_prop = Pred_biomass*Prop_diet) %>%
+  group_by(Pred_code,Pred_biomass_ag,Prey_code) %>%
+  summarise(Diet_comp = sum(Weighted_prop)/Pred_biomass_ag) %>%
   ungroup() %>%
   distinct()
 
 # join with longer names
 ag <- read.csv('../data/GOA_Groups.csv', fileEncoding = 'UTF-8-BOM')
-ag <- ag %>% select(Code, Name) %>% set_names('Code', 'Name')
-
+ag <- ag %>% 
+  select(Code, Name) %>% 
+  set_names('Code', 'Name') %>%
+  rbind(data.frame(Code = 'DLSed', Name = 'Detritus_labile_sediment'))
+  
+# this is just for plotting
 dat3 <- dat2 %>% 
   left_join(ag, by = c('Pred_code'='Code')) %>% 
   left_join(ag, by = c('Prey_code'='Code')) %>%
@@ -65,7 +70,7 @@ ggsave("inverts.png",p,width = 12, height = 8)
 
 # Prepare PPREY for inverts -----------------------------------------------
 
-dat4 <- dat2 %>% select(-Biom_ag)
+dat4 <- dat2 %>% select(-Pred_biomass_ag)
 
 dat5 <- expand.grid(unique(dat4$Pred_code), ag$Code) %>%
   as.data.frame() %>%
@@ -77,10 +82,11 @@ dat5 <- expand.grid(unique(dat4$Pred_code), ag$Code) %>%
   arrange(factor(Pred_code, levels = ag$Code)) %>%
   filter(Pred_code != 'EUP', Pred_code != 'ZM') %>% # dropping EUP and ZM because we do those from NPZ
   mutate(name = paste0('pPREY', Pred_code, ' ', (length(ag$Code)+3))) %>% # +3 because of the detrital sediment
-  select(name, KWT:DR) %>%
-  mutate(DCsed = 0,   # add sediment columns
-         DLsed = 0,
-         DRsed = 0)
+  select(name, KWT:DLSed) %>%
+  mutate(DCsed = DLSed/3,   # add sediment columns
+         DLsed = DLSed/3,
+         DRsed = DLSed/3) %>%
+  select(-DLSed)
 
 # write out
 write.csv(dat5, '../output/inverts_pprey.csv', row.names = F)
