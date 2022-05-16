@@ -375,6 +375,13 @@ calculate_diet_prop <- function(pred_stage,prey_stage){
   
   # make a plot to export
   p <- diet_all_years %>%
+    filter(Pred_at_name != 'Salmon_chinook', # remove from the plot the groups we parameterize from elsewhere
+           Pred_at_name != 'Salmon_chum',
+           Pred_at_name != 'Salmon_coho',
+           Pred_at_name != 'Salmon_pink',
+           Pred_at_name != 'Salmon_sockeye',
+           Pred_at_name != 'Herring',
+           Pred_at_name != 'Shark_demersal') %>%
     mutate(pcW_mean = na_if(pcW_mean,0)) %>%
     ggplot()+
     geom_tile(aes(x = Prey_at_name, y = Pred_at_name, fill = pcW_mean), color = "darkgrey")+
