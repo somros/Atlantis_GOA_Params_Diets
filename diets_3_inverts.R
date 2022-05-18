@@ -81,7 +81,7 @@ dat5 <- expand.grid(unique(dat4$Pred_code), ag$Code) %>%
   pivot_wider(names_from = 'Prey_code', values_from = 'Diet_comp') %>%
   arrange(factor(Pred_code, levels = ag$Code)) %>%
   filter(Pred_code != 'EUP', Pred_code != 'ZM') %>% # dropping EUP and ZM because we do those from NPZ
-  mutate(name = paste0('pPREY', Pred_code, ' ', (length(ag$Code)+3))) %>% # +3 because of the detrital sediment
+  mutate(name = paste0('pPREY', Pred_code, ' ', (length(ag$Code)-1+3))) %>% # -1 because we added DLsed, +3 because of the detrital sediment
   select(name, KWT:DLSed) %>%
   mutate(DCsed = DLSed/3,   # add sediment columns
          DLsed = DLSed/3,
