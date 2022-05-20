@@ -53,7 +53,6 @@ dat3 %>% group_by(Predator) %>% summarise(check = sum(Proportion)) %>% pull(chec
 
 p <- dat3 %>%
   filter(Predator != 'Mesozooplankton',
-         Predator != 'Macrozooplankton',
          Predator != 'Euphausiids') %>%
   mutate(Proportion = na_if(Proportion,0)) %>%
   ggplot()+
