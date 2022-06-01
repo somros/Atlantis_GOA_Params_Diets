@@ -40,6 +40,41 @@ stomach %>% select(Pred_name) %>% distinct() %>% pull()
 stomach %>% select(Prey_Name) %>% distinct() %>% pull()
 ```
 
+How many stomachs?
+```{r}
+stomach %>%
+  filter(between(Year, 1990, 2011)) %>%
+  select(Hauljoin, Pred_nodc, Pred_specn) %>%
+  distinct() %>%
+  nrow()
+```
+
+Look at the spatial extent of this data.
+```{r}
+library(sf)
+library(maps)
+library(mapdata)
+
+coast <- map("worldHires", regions = c("Canada", "USA"), plot = FALSE, fill = TRUE)
+coast <- coast %>% st_as_sf(crs = 4326) %>% st_combine()
+
+t <- stomach %>%
+  filter(between(Year, 1990, 2011)) %>%
+  select(Year, Cruise, Haul, Rlat, Rlong) %>%
+  distinct() %>%
+  st_as_sf(coords = c('Rlong', 'Rlat'), crs = 4326)
+
+t_bbox <- t %>% st_bbox()
+
+t %>%
+  ggplot()+
+  geom_sf(aes(color = Year), size = 2)+
+  geom_sf(data = coast)+
+  coord_sf(xlim = c(t_bbox$xmin, t_bbox$xmax), ylim = c(t_bbox$ymin, t_bbox$ymax))+
+  theme_bw()
+  
+```
+
 We have 81 predators, and prey species are aggregated into 90 groups. 
 
 # Weight proportion in predator stomach
