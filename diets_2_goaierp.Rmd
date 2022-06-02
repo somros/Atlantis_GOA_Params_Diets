@@ -51,6 +51,57 @@ dat_long <- dat_thin %>% pivot_longer(cols = (Agonidae:Zaproridae),names_to = "P
 dat_long$PreyWeight[is.na(dat_long$PreyWeight)]<-0 # turn NAs to 0's
 ```
 
+What's with ATF as salmon's prey?
+```{r}
+t <- dat_long %>% 
+  filter(PreyName == 'Arrowtooth flounder' & PreyWeight > 0 & grepl('Salmon', CommonName)) %>%
+  group_by(CommonName, Pred_LHS) %>%
+  summarise(Num = sum(Number_of_Stomachs))
+```
+
+Sample size.
+```{r}
+dat_long %>% 
+  filter(CommonName %in% c("Chinook Salmon","Chum Salmon","Coho Salmon","Pink Salmon","Sockeye Salmon","Pacific Herring")) %>%
+  select(StationID, CommonName, Pred_LHS, Number_of_Stomachs, PreyWeight) %>%
+  filter(PreyWeight > 0) %>%
+  #select(-PreyWeight) %>%
+  distinct() %>%
+  nrow()
+```
+
+Spatial footprint.
+```{r}
+library(sf)
+library(maps)
+library(mapdata)
+stations <- read_excel('../data/GOAIERP/Jamal GoA Catch.xlsx', sheet = 1)
+stations <- hauls %>% select(StationID, EQLatitude, EQLongitude) %>%
+  distinct()
+
+coast <- map("worldHires", regions = c("Canada", "USA"), plot = FALSE, fill = TRUE)
+coast <- coast %>% st_as_sf(crs = 4326) %>% st_combine()
+
+spatial <- dat_long %>% 
+  filter(CommonName %in% c("Chinook Salmon","Chum Salmon","Coho Salmon","Pink Salmon","Sockeye Salmon","Pacific Herring")) %>%
+  select(Year, StationID, CommonName, Pred_LHS, Number_of_Stomachs, PreyWeight) %>%
+  filter(PreyWeight > 0) %>%
+  left_join(stations, by = 'StationID') %>% 
+  st_as_sf(coords = c('EQLongitude', 'EQLatitude'), crs = 4326) 
+
+# how many stations?
+spatial %>% pull(StationID) %>% unique() %>% length()
+
+diet_bbox <- st_bbox(spatial)
+
+spatial %>% ggplot()+
+  geom_sf(aes(color = Year), size = 2)+
+  geom_sf(data = coast)+
+  coord_sf(xlim = c(diet_bbox$xmin, diet_bbox$xmax), ylim = c(diet_bbox$ymin, diet_bbox$ymax))+
+  theme_bw()
+```
+
+
 ## From species to Atlantis group
 
 Here we do three things:
@@ -202,7 +253,8 @@ pprey_goaierp <- temp %>%
   pivot_wider(names_from = Code.y, values_from = Prop) %>%
   mutate(DCsed = 0, 
          DLsed = 0, 
-         DRsed = 0)
+         DRsed = 0) %>%
+  mutate(across(where(is.numeric), ~ .x / 10))
 ```
 
 Write out.
