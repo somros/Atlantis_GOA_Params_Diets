@@ -77,10 +77,15 @@ write.csv(diet_tab, 'diets_table.csv', row.names = F)
 
 all_fg <- unique(diets_long$Pred_name)
 
-diets_long$Stage <- gsub('Prey1', 'Prey_juv', diets_long$Stage)
-diets_long$Stage <- gsub('Prey2', 'Prey_adult', diets_long$Stage)
-diets_long$Stage <- gsub('Predator1', 'Pred_juv', diets_long$Stage)
-diets_long$Stage <- gsub('Predator2', 'Pred_adult', diets_long$Stage)
+diets_long$Stage <- gsub('Prey1:Predator1', 'Pred_juv:Prey_juv', diets_long$Stage)
+diets_long$Stage <- gsub('Prey1:Predator2', 'Pred_adult:Prey_juv', diets_long$Stage)
+diets_long$Stage <- gsub('Prey2:Predator1', 'Pred_juv:Prey_adult', diets_long$Stage)
+diets_long$Stage <- gsub('Prey2:Predator2', 'Pred_adult:Prey_juv', diets_long$Stage)
+
+diets_long$Stage <- factor(diets_long$Stage, levels = c('Pred_juv:Prey_juv',
+                                                        'Pred_juv:Prey_adult',
+                                                        'Pred_adult:Prey_juv',
+                                                        'Pred_adult:Prey_adult'))
 
 for (i in 1:length(all_fg)){
   this_fg <- all_fg[i]
