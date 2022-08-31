@@ -39,7 +39,8 @@ plankton3 <- plankton2 %>%
 # view
 plankton3 %>%
   ggplot(aes(y=Prop,x=Predator_Atlantis,fill=Prey_Atlantis))+
-  geom_bar(position = 'stack',stat='identity')
+  geom_bar(position = 'stack',stat='identity')+
+  theme_bw()
 
 # we are missing macrozooplankton information here, but we can get those from Kerim's tech memo (they were quite generic)
 # and then we can calibrate
