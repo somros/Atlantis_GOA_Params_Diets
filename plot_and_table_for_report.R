@@ -1,6 +1,7 @@
 # plot and produce tables for the methods
 library(tidyverse)
 library(viridis)
+library(RColorBrewer)
 
 diets <- read.csv('../output/goa_pprey_matrix.csv')
 
@@ -70,3 +71,37 @@ diet_tab <- diets %>%
 
 # write as csv
 write.csv(diet_tab, 'diets_table.csv', row.names = F)
+
+# Make plots for individual groups for the methods ---------------------------------------
+# Separate juveniles from adults
+
+all_fg <- unique(diets_long$Pred_name)
+
+diets_long$Stage <- gsub('Prey1', 'Prey_juv', diets_long$Stage)
+diets_long$Stage <- gsub('Prey2', 'Prey_adult', diets_long$Stage)
+diets_long$Stage <- gsub('Predator1', 'Pred_juv', diets_long$Stage)
+diets_long$Stage <- gsub('Predator2', 'Pred_adult', diets_long$Stage)
+
+for (i in 1:length(all_fg)){
+  this_fg <- all_fg[i]
+  
+  this_diet <- diets_long %>% 
+    filter(Pred_name == this_fg) %>%
+    drop_na() %>%
+    mutate(Prop = Prop/100)
+  
+  colourCount <- length(unique(this_diet$Prey_name)) 
+  getPalette <- colorRampPalette(brewer.pal(12, "Paired"))
+  
+  p <- this_diet %>%
+    ggplot()+
+    geom_bar(aes(x = Stage, y = Prop, fill = Prey_name), stat = 'identity', position = 'stack')+
+    scale_fill_manual(values = getPalette(colourCount))+
+    theme_bw()+
+    theme(axis.text.x = element_text(angle = 20, hjust = 1.05, vjust = 1, size = 11),
+          axis.text.y = element_text(size = 11))+
+    labs(x = '', y = "Proportion of diet",
+         fill = "Prey")
+  
+  ggsave(paste('../output/By_group/',this_fg,'diet.png',sep='_'), p, width = 10.5, height = 5.5)
+}
