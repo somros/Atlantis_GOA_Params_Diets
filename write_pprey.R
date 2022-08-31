@@ -20,6 +20,7 @@ reem_list <- list()
 
 # REEM --------------------------------------------------------------------
 for (i in 1:length(reem_files)){
+  
   this_reem <- read.csv(reem_files[i])
   
   # establish what combination of prey-pred the file contains
@@ -38,6 +39,13 @@ for (i in 1:length(reem_files)){
     left_join(goa_key, by = c('Prey_at_name'='Name')) %>%
     select(Code.x,Code.y,pcW_mean) %>%
     set_names(c('pred','prey','value'))
+  
+  ## check
+  # this_reem %>%
+  #   pivot_wider(names_from = prey, values_from = value) %>%
+  #   mutate(sum = rowSums(across(where(is.numeric)))) %>%
+  #   pull(sum) %>%
+  #   mean()
   
   # complete the combinations to add all functional groups
   all_codes <- expand.grid(goa_codes,c(goa_codes,"DCsed","DLsed","DRsed")) %>%
@@ -90,6 +98,12 @@ to_drop <- c('SCH','SCO','SPI','SCM','SSO','HER',
 
 pprey_verts <- pprey_verts %>%
   filter(predcode %in% setdiff(goa_codes, to_drop)) 
+
+# check that rows add up to 0.1 (except CAP and SAN, at this stage they are allowed to be 0)
+pprey_verts %>% 
+  mutate(sum = rowSums(across(where(is.numeric)))) %>%
+  pull(sum) %>%
+  mean()
 
 # GOAIERP salmon and herring ----------------------------------------------
 
