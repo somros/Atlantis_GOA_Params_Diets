@@ -5,6 +5,10 @@ library(RColorBrewer)
 
 diets <- read.csv('../output/goa_pprey_matrix.csv')
 
+# diets %>%
+#   filter(grepl('RFD',name)) %>%
+#   select(name,SBF)
+
 # plot
 diets <- diets %>%
   mutate(tmp = substr(name, 6, (nchar(name)-3))) %>%
@@ -22,12 +26,16 @@ diets_inv$Pred_stage <- rep(c(1,2), nrow(diets_inv_tmp)*2)
 diets_inv$Prey_stage <- rep(c(1,1,2,2), nrow(diets_inv_tmp))
 
 # and now bring together
-diets <- rbind(diets %>% filter(!is.na(Pred_stage)), diets_inv)
+diets <- rbind(diets %>% filter(!is.na(Pred_stage)), diets_inv) %>% as_tibble()
+
+diets %>%
+  filter(Pred_name == "RFD") %>%
+  select(Pred_name:Prey_stage, SBF)
 
 diets_long <- diets %>%
   pivot_longer(-(Pred_name:Prey_stage), names_to = 'Prey_name', values_to = 'Prop') %>%
   mutate(Prop = Prop * 10 * 100,
-         Stage = paste0('Prey', Pred_stage, ':Predator', Prey_stage)) 
+         Stage = paste0('Prey', Prey_stage, ':Predator', Pred_stage))
 
 # attach long names
 fg <- read.csv('../data/GOA_Groups.csv') %>% select(Code, Name)
@@ -75,12 +83,15 @@ write.csv(diet_tab, 'diets_table.csv', row.names = F)
 # Make plots for individual groups for the methods ---------------------------------------
 # Separate juveniles from adults
 
+diets_long %>%
+  filter(Pred_name == 'Rockfish_demersal_shelf' & Prey_name == 'Sablefish')
+
 all_fg <- unique(diets_long$Pred_name)
 
 diets_long$Stage <- gsub('Prey1:Predator1', 'Pred_juv:Prey_juv', diets_long$Stage)
 diets_long$Stage <- gsub('Prey1:Predator2', 'Pred_adult:Prey_juv', diets_long$Stage)
 diets_long$Stage <- gsub('Prey2:Predator1', 'Pred_juv:Prey_adult', diets_long$Stage)
-diets_long$Stage <- gsub('Prey2:Predator2', 'Pred_adult:Prey_juv', diets_long$Stage)
+diets_long$Stage <- gsub('Prey2:Predator2', 'Pred_adult:Prey_adult', diets_long$Stage)
 
 diets_long$Stage <- factor(diets_long$Stage, levels = c('Pred_juv:Prey_juv',
                                                         'Pred_juv:Prey_adult',
