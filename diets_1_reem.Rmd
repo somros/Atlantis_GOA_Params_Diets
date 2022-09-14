@@ -72,6 +72,8 @@ prey_length <- prey_length %>%
   filter(!is.na(Stratum))
 ```
 
+
+
 What species can we carry out the size structure analysis for? The limiting set will be the prey length set. We will need a species list for predator and prey, but take both from the prey set as that is the smallest.
 ```{r}
 pred_species <- prey_length %>% 
@@ -299,6 +301,9 @@ rr <- data.frame(Name.x = 'Raja rhina', Atlantis.group = 'SKL', Nodc = 871304010
 nodc_matching_key <- rbind(nodc_matching_key,rr)
 
 calculate_diet_prop <- function(pred_stage,prey_stage){
+  
+  if(pred_stage == 'A'){pred_stage_long <- 'Adult'} else {pred_stage_long <- 'Juvenile'}
+  if(prey_stage == 'A'){prey_stage_long <- 'Adult'} else {prey_stage_long <- 'Juvenile'}
  
   pred_subset <- predator_by_stage %>% 
     filter(Pred_stage %in% c(pred_stage,'U'), Prey_stage %in% c(prey_stage,'U')) %>% 
@@ -390,16 +395,27 @@ calculate_diet_prop <- function(pred_stage,prey_stage){
     theme_bw()+
     theme(axis.text.x = element_text(angle = 60, hjust = 1.05, vjust = 1, size = 14),
           axis.text.y = element_text(size = 14))+
-    labs(title = paste0("Proportion of predator diet (",pred_stage," predator and ",prey_stage," prey)"), 
+    labs(title = paste0("Proportion of predator diet (",pred_stage_long," predator and ",prey_stage_long," prey)"), 
          x = "Prey", y = "Predator",
          fill = "Proportion of ingested prey")
   
   ggsave(paste("../output/REEM/dietprop_stratum_pred_",pred_stage,"_prey_",prey_stage,".png",sep = ""),p,width = 16, height = 12)
+  
+  return(diet_all_years)
 }
 
 # run the function and make four plots
-calculate_diet_prop('J','J')
-calculate_diet_prop('J','A')
-calculate_diet_prop('A','J')
-calculate_diet_prop('A','A')
+dietprop_JJ <- calculate_diet_prop('J','J')
+dietprop_JA <- calculate_diet_prop('J','A')
+dietprop_AJ <- calculate_diet_prop('A','J')
+dietprop_AA <- calculate_diet_prop('A','A')
+```
+
+Doing some checks to make sure we are adding up to 1.
+```{r}
+dietprop_JA %>%
+  pivot_wider(names_from = Prey_at_name, values_from = pcW_mean) %>%
+  mutate(sum = rowSums(across(where(is.numeric)))) %>%
+  pull(sum) %>%
+  mean()
 ```
