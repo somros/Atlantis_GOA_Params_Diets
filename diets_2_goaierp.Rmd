@@ -76,7 +76,7 @@ library(sf)
 library(maps)
 library(mapdata)
 stations <- read_excel('../data/GOAIERP/Jamal GoA Catch.xlsx', sheet = 1)
-stations <- hauls %>% select(StationID, EQLatitude, EQLongitude) %>%
+stations <- stations %>% select(StationID, EQLatitude, EQLongitude) %>%
   distinct()
 
 coast <- map("worldHires", regions = c("Canada", "USA"), plot = FALSE, fill = TRUE)
