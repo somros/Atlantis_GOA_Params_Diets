@@ -174,7 +174,7 @@ diet_by_station %>% group_by(Year,CommonName,Pred_LHS) %>% summarise(check = sum
 Join with Atlantis groups for plotting purposes.
 ```{r}
 ag <- read.csv('../data/GOA_Groups.csv', fileEncoding = 'UTF-8-BOM')
-ag <- ag %>% select(Code, Name) %>% set_names('Atlantis_code', 'Prey_name')
+ag <- ag %>% select(Code, Name, LongName) %>% set_names('Atlantis_code', 'Prey_name', 'Prey_LongName')
 
 diet_by_station <- diet_by_station %>% left_join(ag, by = c('Atlantis_code'))
 ```
@@ -183,7 +183,7 @@ Now group by year and produce a diet matrix with proportion. make sure that the 
 ```{r, fig.width = 12, fig.height = 6}
 # Add a species*stage field
 diet_species_and_stage <- diet_by_station %>% 
-  group_by(CommonName,Pred_LHS,Prey_name) %>%
+  group_by(CommonName,Pred_LHS,Prey_name,Prey_LongName) %>%
   summarise(MeanProp = mean(pcW_weighted)) %>%
   ungroup() %>%
   rowwise() %>%
@@ -192,17 +192,17 @@ diet_species_and_stage <- diet_by_station %>%
 p <- diet_species_and_stage %>% 
   mutate(MeanProp = ifelse(MeanProp==0,NA,MeanProp)) %>%
   ggplot()+
-  geom_tile(aes(x=Prey_name,y=PredName,fill=MeanProp),color='darkgrey')+
+  geom_tile(aes(x=Prey_LongName,y=PredName,fill=MeanProp),color='darkgrey')+
   scale_fill_viridis()+
   theme_bw()+
-  theme(axis.text.x = element_text(angle = 60, hjust = 1.05, vjust = 1, size = 14),
-          axis.text.y = element_text(size = 14))+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1.05, vjust = 1, size = 12),
+          axis.text.y = element_text(size = 12))+
   labs(title = "Proportion of predator diet", 
          x = "Prey", y = "Predator",
          fill = "Proportion of ingested prey")
 p
 
-ggsave('goaierp.png',p,width = 12, height = 8)
+ggsave('NEW_goaierp.png',p,width = 10, height = 6)
 ```
 
 # Older data

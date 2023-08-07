@@ -37,10 +37,20 @@ plankton3 <- plankton2 %>%
   ungroup()
 
 # view
-plankton3 %>%
-  ggplot(aes(y=Prop,x=Predator_Atlantis,fill=Prey_Atlantis))+
+fgl <- read.csv('../data/GOA_Groups.csv') %>% select(Name,LongName)
+
+p <- plankton3 %>%
+  left_join(fgl, by = c('Predator_Atlantis'='Name')) %>%
+  rename(Predator_Atlantis_Long = LongName) %>%
+  left_join(fgl, by = c('Prey_Atlantis'='Name')) %>%
+  rename(Prey_Atlantis_Long = LongName) %>%
+  ggplot(aes(y=Prop,x=Predator_Atlantis_Long,fill=Prey_Atlantis_Long))+
   geom_bar(position = 'stack',stat='identity')+
+  scale_fill_viridis_d(begin = 0.1, end = 0.9)+
+  labs(x = 'Predator', y = 'Proportion', fill = 'Prey')+
   theme_bw()
+p
+ggsave('NEW_plankton_NPZ.png', p, width = 6, height = 3)
 
 # we are missing macrozooplankton information here, but we can get those from Kerim's tech memo (they were quite generic)
 # and then we can calibrate

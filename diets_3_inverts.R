@@ -36,18 +36,18 @@ dat2 <- dat1 %>%
 # join with longer names
 ag <- read.csv('../data/GOA_Groups.csv', fileEncoding = 'UTF-8-BOM')
 ag <- ag %>% 
-  select(Code, Name) %>% 
-  set_names('Code', 'Name') %>%
-  rbind(data.frame(Code = 'DLSed', Name = 'Detritus_labile_sediment'))
+  select(Code, Name, LongName) %>% 
+  set_names('Code', 'Name', 'LongName') %>%
+  rbind(data.frame(Code = 'DLSed', Name = 'Detritus_labile_sediment', LongName = 'Labile detritus (sediment)'))
   
 # this is just for plotting
 dat3 <- dat2 %>% 
   left_join(ag, by = c('Pred_code'='Code')) %>% 
   left_join(ag, by = c('Prey_code'='Code')) %>%
-  select(Name.x,Name.y,Diet_comp) %>%
-  set_names(c("Predator","Prey","Proportion")) 
+  select(Name.x,LongName.x,Name.y,LongName.y,Diet_comp) %>%
+  set_names(c("Predator","Predator_LongName","Prey","Prey_LongName","Proportion")) 
 
-dat3 %>% group_by(Predator) %>% summarise(check = sum(Proportion)) %>% pull(check) %>% mean()
+dat3 %>% group_by(Predator,Predator_LongName) %>% summarise(check = sum(Proportion)) %>% pull(check) %>% mean()
 
 # plot
 
@@ -56,19 +56,19 @@ p <- dat3 %>%
          Predator != 'Euphausiids') %>%
   mutate(Proportion = na_if(Proportion,0)) %>%
   ggplot()+
-  geom_tile(aes(x = Prey, y = Predator, fill = Proportion), color = "darkgrey")+
+  geom_tile(aes(x = Prey_LongName, y = Predator_LongName, fill = Proportion), color = "darkgrey")+
   scale_fill_viridis()+
   #scale_fill_gradient2(low = "blue", high = "red", midpoint = .5, na.value="grey")+
   theme_bw()+
-  theme(axis.text.x = element_text(angle = 60, hjust = 1.05, vjust = 1, size = 14),
-        axis.text.y = element_text(size = 14))+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1.05, vjust = 1, size = 12),
+        axis.text.y = element_text(size = 12))+
   labs(title = "Proportion of predator diet", 
        x = "Prey", y = "Predator",
        fill = "Proportion of ingested prey")
 
 p
 
-ggsave("inverts.png",p,width = 12, height = 8)
+ggsave("NEW_inverts.png",p,width = 10, height = 5)
 
 # Prepare PPREY for inverts -----------------------------------------------
 

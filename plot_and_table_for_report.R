@@ -98,13 +98,25 @@ diets_long$Stage <- factor(diets_long$Stage, levels = c('Pred_juv:Prey_juv',
                                                         'Pred_adult:Prey_juv',
                                                         'Pred_adult:Prey_adult'))
 
+# aggregate stage of the predator
+diets_long_aggregate <- diets_long %>%
+  mutate(Stage = str_replace(Stage, ':Prey.*', '')) %>%
+  group_by(Pred_name, Stage, Prey_name) %>%
+  summarise(Prop = sum(Prop, na.rm = T))
+
+# do you want to plot aggregated prey stages?
+aggr <- TRUE
+
 for (i in 1:length(all_fg)){
+  if(aggr){diets_long1 <- diets_long_aggregate}
+  
   this_fg <- all_fg[i]
   
-  this_diet <- diets_long %>% 
+  this_diet <- diets_long1 %>% 
     filter(Pred_name == this_fg) %>%
     drop_na() %>%
-    mutate(Prop = Prop/100)
+    mutate(Prop = Prop/100) %>%
+    filter(Prop > 0.005)
   
   colourCount <- length(unique(this_diet$Prey_name)) 
   getPalette <- colorRampPalette(brewer.pal(12, "Paired"))
@@ -119,5 +131,10 @@ for (i in 1:length(all_fg)){
     labs(x = '', y = "Proportion of diet",
          fill = "Prey")
   
-  ggsave(paste('../output/By_group/',this_fg,'diet.png',sep='_'), p, width = 10.5, height = 5.5)
+  if(length(unique(this_diet$Stage)) == 1) {
+    ggsave(paste('../output/By_group_aggregate/',this_fg,'diet.png',sep='_'), p, width = 4, height = 6)
+  } else {
+    ggsave(paste('../output/By_group_aggregate/',this_fg,'diet.png',sep='_'), p, width = 8, height = 6)
+  }
+  
 }

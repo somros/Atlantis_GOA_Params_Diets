@@ -50,7 +50,7 @@ stomach %>%
 ```
 
 Look at the spatial extent of this data.
-```{r}
+```{r, fig.width=10, fig.height=4}
 library(sf)
 library(maps)
 library(mapdata)
@@ -68,11 +68,11 @@ t_bbox <- t %>% st_bbox()
 
 t %>%
   ggplot()+
-  geom_sf(aes(color = Year), size = 2)+
+  geom_sf(aes(color = Year), size = 1)+
   geom_sf(data = coast)+
+  scale_color_viridis()+
   coord_sf(xlim = c(t_bbox$xmin, t_bbox$xmax), ylim = c(t_bbox$ymin, t_bbox$ymax))+
   theme_bw()
-  
 ```
 
 We have 81 predators, and prey species are aggregated into 90 groups. 

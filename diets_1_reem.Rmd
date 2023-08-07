@@ -145,14 +145,14 @@ Taking parameters from [Froese et al. (2014)](https://doi.org/10.1111/jai.12299)
 ```{r}
 lw_pred <- pred_species %>% 
   mutate(lw_bayes = purrr::pmap(list(this_genus=Genus,this_species=Species),possibly(apply_Froese,NA))) %>%
-  unnest_wider(col = c(lw_bayes)) %>%
+  unnest_wider(col = c(lw_bayes), names_sep = "_") %>%
   set_names(c('Genus','Species','Log10a','b')) %>%
   mutate(a=10^Log10a) %>% # because the models return log10a, not a
   select(-Log10a)
 
 lw_prey <- prey_species %>% 
   mutate(lw_bayes = purrr::pmap(list(this_genus=Genus,this_species=Species),possibly(apply_Froese,NA))) %>%
-  unnest_wider(col = c(lw_bayes)) %>%
+  unnest_wider(col = c(lw_bayes), names_sep = "_") %>%
   set_names(c('Genus','Species','Log10a','b')) %>%
   mutate(a=10^Log10a) %>% # because the models return log10a, not a
   select(-Log10a)
@@ -376,7 +376,16 @@ calculate_diet_prop <- function(pred_stage,prey_stage){
   if(check_sum!=1){warning("The diet proportions do not add up to 1")}
   
   # write this out
-  write.csv(diet_all_years,paste("../output/REEM/dietprop_stratum_pred_",pred_stage,"_prey_",prey_stage,".csv",sep = ""), row.names = F)
+  write.csv(diet_all_years,paste("../output/REEM/NEW_dietprop_stratum_pred_",pred_stage,"_prey_",prey_stage,".csv",sep = ""), row.names = F)
+  
+  # add long names for plots
+  fg <- read.csv('../data/GOA_Groups.csv')
+  fg <- fg %>% select(Name, LongName)
+  diet_all_years <- diet_all_years %>%
+    left_join(fg, by = c('Prey_at_name'='Name')) %>%
+    rename(LongName_Prey = LongName) %>%
+    left_join(fg, by = c('Pred_at_name'='Name')) %>%
+    rename(LongName_Pred = LongName)
   
   # make a plot to export
   p <- diet_all_years %>%
@@ -389,17 +398,17 @@ calculate_diet_prop <- function(pred_stage,prey_stage){
            Pred_at_name != 'Shark_demersal') %>%
     mutate(pcW_mean = na_if(pcW_mean,0)) %>%
     ggplot()+
-    geom_tile(aes(x = Prey_at_name, y = Pred_at_name, fill = pcW_mean), color = "darkgrey")+
+    geom_tile(aes(x = LongName_Prey, y = LongName_Pred, fill = pcW_mean), color = "darkgrey")+
     scale_fill_viridis()+
     #scale_fill_gradient2(low = "blue", high = "red", midpoint = .5, na.value="grey")+
     theme_bw()+
-    theme(axis.text.x = element_text(angle = 60, hjust = 1.05, vjust = 1, size = 14),
-          axis.text.y = element_text(size = 14))+
+    theme(axis.text.x = element_text(angle = 60, hjust = 1.05, vjust = 1, size = 12),
+          axis.text.y = element_text(size = 12))+
     labs(title = paste0("Proportion of predator diet (",pred_stage_long," predator and ",prey_stage_long," prey)"), 
          x = "Prey", y = "Predator",
-         fill = "Proportion of ingested prey")
+         fill = "Proportion of\ningested prey")
   
-  ggsave(paste("../output/REEM/dietprop_stratum_pred_",pred_stage,"_prey_",prey_stage,".png",sep = ""),p,width = 16, height = 12)
+  ggsave(paste("../output/REEM/NEW_dietprop_stratum_pred_",pred_stage,"_prey_",prey_stage,".png",sep = ""),p,width = 13, height = 7.5)
   
   return(diet_all_years)
 }

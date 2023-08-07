@@ -29,8 +29,8 @@ select <- dplyr::select
 
 Import data.
 ```{r}
-stomach <- read.csv("..data/1_Gulf Of Alaska_RawPP.csv")
-prey_length <- read.csv("..data/1_Gulf Of Alaska_RawPL.csv")
+stomach <- read.csv("../data/1_Gulf Of Alaska_RawPP.csv")
+prey_length <- read.csv("../data/1_Gulf Of Alaska_RawPL.csv")
 nodc_key_native <- read.csv("C:/Users/Alberto Rovellini/Documents/GOA/Parametrization/Diet/data/PreyNODCForWeb.csv")
 ```
 
@@ -41,8 +41,8 @@ prey_length <- prey_length %>% set_names(gsub("X.","",colnames(prey_length)))
 
 Import previous keys we have used.
 ```{r}
-race_key <- read.csv("..data/RACE_species_goa_Atlantis.csv")
-dfo_key <- read.csv("..data/dfo_species_atlantis.csv")
+race_key <- read.csv("../data/RACE_species_goa_Atlantis.csv")
+dfo_key <- read.csv("../data/dfo_species_atlantis.csv")
 goa_groups <- read.csv("C:/Users/Alberto Rovellini/Documents/GOA/Parametrization/Diet/data/GOA_Groups.csv", fileEncoding = "UTF-8-BOM")
 ```
 
