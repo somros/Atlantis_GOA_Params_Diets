@@ -1,4 +1,7 @@
-# Read PROD.nc
+# Alberto Rovellini
+# 11/15/2023
+# This code pulls the Eat tracers from the PROD.nc file to estimate vertebrate consumption
+# 
 
 library(tidyverse)
 library(rbgm)
@@ -358,6 +361,7 @@ ggsave("consumption_from_PROD.png", p, width = 8, height = 16)
 
 # now sum all age classes and get annual consumption
 annual_consumption <- eat_base %>%
+  filter(ts > 30) %>% # because consumption for year 30 is not included
   mutate(year = ceiling(ts)) %>%
   group_by(LongName, year) %>%
   summarise(Q = sum(daily_eat_mt))
@@ -382,7 +386,9 @@ qb_t3 <- annual_consumption %>%
 
 qb_t3 %>%
   ggplot(aes(x = year, y = QB, color = LongName))+
-  geom_line()+
+  geom_line(linewidth = 1.5)+
   theme_bw()
 
 # The method that apportions the "Eat" tracer to depth layers by fish biomass returns low QB values (0.2-0.7 for Tier 3 stocks)
+# This is roughly an order of magnitude lower than in Aydin et al. (2007)
+# It is also imprecise
