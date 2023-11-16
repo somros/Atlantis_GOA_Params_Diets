@@ -1,23 +1,30 @@
-# Alberto Rovellini
-# 11/15/2023
-# This code pulls the Eat tracers from the PROD.nc file to estimate vertebrate consumption
-# 
+---
+title: "Consumption from PROD.nc"
+author: "Alberto Rovellini"
+date: "11/15/2023"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, warning = F, message = F)
+```
+
+This code pulls the Eat tracers from the PROD.nc file to estimate vertebrate consumption.
+
+```{r}
 library(tidyverse)
 library(rbgm)
-library(ggsidekick)
-library(maps)
-library(mapdata)
 library(tidync)
-library(sf)
 library(viridis)
-library(ggh4x)
-library(RColorBrewer)
+```
 
+Setup.
+```{r}
 select <- dplyr::select
-
-# make new folder to save plots in
-now <- gsub(' ', '_', gsub(':', '.', Sys.time()))
 
 run_base <- 1328 # this is the control run we compare results to
 run_new <- 1329 # just warm (temp) forcings
@@ -25,19 +32,14 @@ run_new <- 1329 # just warm (temp) forcings
 # set paths to directories
 dir_base <- paste0('../../output_files/data/out_', run_base, '/')
 dir_new <- paste0('../../output_files/data/out_', run_new, '/')
+```
 
-# Read files --------------------------------------------------------------
-# Geography: read bgm
-fl <- '../data/GOA_WGS84_V4_final.bgm'
-bgm <- read_bgm(fl)
-goa_sf <- box_sf(bgm)
-st_crs(goa_sf) <- st_crs(attr(goa_sf$geometry, "crs")$proj)
-boundary_boxes <- goa_sf %>% filter(boundary == TRUE) %>% pull(box_id) # get boundary boxes
-
+Read in files, prepare group tables, etc.
+```{r}
 # Biology: read Groups.csv
 grps <- read.csv('../data/GOA_Groups.csv', header = T)
 
-# set up a functional group types table
+# utility group tables
 vertebrate_groups <- grps %>% filter(GroupType%in%c("FISH","SHARK","BIRD","MAMMAL")) %>% mutate(BiomassType="vertebrate")
 plankton_groups <- grps %>% filter(GroupType %in% c("PWN",'CEP','LG_ZOO','MED_ZOO','SM_ZOO','LG_PHY','SM_PHY')) %>%
   mutate(BiomassType="plankton")
@@ -64,10 +66,10 @@ agemat <- read.csv('../data/agemat.csv', header = T)
 # read in biomass CSV
 biomage_file <- list.files(dir_base, pattern = "AgeBiom", full.names = T)[1]
 biomage <- read.table(biomage_file, sep = " ", header = T)
+```
 
-# Model output: read NetCDF files
-# We need both the PROD and the regular nc output files
-# base run
+Read in the NetCDF files. We need both the PROD and the regular nc output files
+```{r}
 # regular
 out_fl_base <- paste0(dir_base, 'outputGOA0', run_base, '_test.nc')
 out_base <- tidync(out_fl_base)
@@ -76,14 +78,9 @@ this_nc_base <- ncdf4::nc_open(out_fl_base)
 out_fl_base_prod <- paste0(dir_base, 'outputGOA0', run_base, '_testPROD.nc')
 out_base_prod <- tidync(out_fl_base_prod)
 this_nc_base_prod <- ncdf4::nc_open(out_fl_base_prod)
-# # new run
-# out_fl_new <- paste0(dir_new, 'outputGOA0', run_new, '_testPROD.nc')
-# out_new <- tidync(out_fl_new)
-# this_nc_new <- ncdf4::nc_open(out_fl_new)
 
 # derived values for output
 depths <- out_base %>% hyper_filter(t=t==0) %>% hyper_tibble(select_var="dz") %>% dplyr::select(-t)
-# glimpse(depths)
 
 # # volumes of each layer
 # # extract from base run
@@ -91,25 +88,19 @@ volumes <- out_base %>% hyper_filter(t=t==0) %>% hyper_tibble(select_var="volume
 # careful with indexing of volumes...
 box_volumes <- volumes %>% mutate(b = b-1) %>% group_by(b) %>% summarize(volume = sum(volume))
 
-#
 # # time dimension
 # # extract from base run
 ts <- ncdf4::ncvar_get(this_nc_base,varid = "t") %>% as.numeric
 tyrs <- ts/(60*60*24*365)
 
-areas <- volumes %>% filter(z==max(z)) %>% dplyr::select(b,volume) %>% rename(area=volume)
+areas <- volumes %>% filter(z==max(z)) %>% dplyr::select(b,volume) %>% rename(area=volume) # volume of sediment layer
+```
 
-# read consumption time series by age class
-# this also needs to pull in numbers, RN, and SN from the out.nc file, to apportion consumption to box layers
+Write a function to read consumption time series by age class. It also needs to pull in numbers, RN, and SN from the `out.nc` file, to apportion consumption to box layers.
+
+```{r}
 plot_eat_timeseries <- function(fg, out, outprod, this.nc, this.nc.prod, run){
   
-  # These are used for testing / debugging
-  # fg = "Pollock"
-  # out = out_base
-  # outprod = out_base_prod 
-  # this.nc = this_nc_base
-  # this.nc.prod = this_nc_base_prod 
-
   print(paste("Doing", fg))
   
   # get the attributes associated with each functional group
@@ -150,61 +141,25 @@ plot_eat_timeseries <- function(fg, out, outprod, this.nc, this.nc.prod, run){
     # # add the two weight matrices to get total nitrogen weight
     rnsn <- purrr::map2(resN,strucN,`+`)
     
-    # check the sanity of this step
-    # check1 <- resN[[1]][4,,] # non-0 values in boundary boxes because of fillvals in init.nc, but accounted for in nums which are 0 in BB's
-    # check2 <- strucN[[1]][4,,]
-    # check3 <- rnsn[[1]][4,,] # seems all good
-
     # # multiply by numbers to get total biomass per cell (unit is irrelevant here because we will use this to calculate proportions)
     biomass <- purrr::map2(rnsn,nums,`*`)
     
-    # check this step
-    # throughout, remember that layer 7 is sediment, layer 6 is the surface, and so on...
-    # check4 <- nums[[1]][4,,]
-    # check5 <- biomass[[1]][4,,] # this is sane
-    
     # now we have a list for eat and a list for biomass
-    # could collapse the dimensions here and work with data frames instead, but it will be slow.
-    # GOAL: take Q by ts by box, and apportion it to layers
+    # take eat by ts by box, and apportion it to layers
     # Initialize a list or array to store the results
     distributed_eat <- list()
     
     # Loop through each age class
     for (i in 1:length(eat)) {
-
+      
       # Calculate sum of biomass across depth layers (7, 109, 251 -> 109, 251)
       sum_biomass <- apply(biomass[[i]], c(2, 3), sum)
       
-      # # check
-      # check6 <- biomass[[1]][1,,] +
-      #   biomass[[1]][2,,] +
-      #   biomass[[1]][3,,] +
-      #   biomass[[1]][4,,] +
-      #   biomass[[1]][5,,] +
-      #   biomass[[1]][6,,] +
-      #   biomass[[1]][7,,] -
-      #   sum_biomass 
-      # max(check6) # this works
-        
       # Expand sum_biomass to a 3D array to match dimensions of biomass[[i]]
       expanded_sum_biomass <- array(rep(sum_biomass, each = 7), dim = dim(biomass[[i]]))
       
-      # check7 <- expanded_sum_biomass[1,,]
-      # check8 <- expanded_sum_biomass[4,,] # this works
-      
       # Calculate proportions
       proportions <- biomass[[i]] / expanded_sum_biomass
-      
-      # check, these need to add up to 1 over the water column
-      # check9 <- proportions[1,,] + 
-      #   proportions[2,,] + 
-      #   proportions[3,,] + 
-      #   proportions[4,,] +
-      #   proportions[5,,] +
-      #   proportions[6,,] +
-      #   proportions[7,,]
-      # min(check9, na.rm = T) # this works, all proportions add up to 1 across the water column
-      
       
       # Initialize an array to store the distributed values for this age class
       distributed_values <- array(dim = dim(biomass[[i]]))
@@ -218,17 +173,6 @@ plot_eat_timeseries <- function(fg, out, outprod, this.nc, this.nc.prod, run){
       distributed_eat[[i]] <- distributed_values
     }
     
-    # check
-    # check10 <- distributed_eat[[5]][1,,] +
-    #   distributed_eat[[5]][2,,] +
-    #   distributed_eat[[5]][3,,] +
-    #   distributed_eat[[5]][4,,] +
-    #   distributed_eat[[5]][5,,] +
-    #   distributed_eat[[5]][6,,] +
-    #   distributed_eat[[5]][7,,] -
-    #   eat[[5]]
-    # min(check10, na.rm = T) # this works, they all sum up to the original eat values
-    
     # this contains values in mg N m-3 d-1, but disaggregated by depth layer based on biomass per depth layer
     
     # mind that layers are indexed like 7 = sediment, 6 = surface, etc, so make sure that volumes match this
@@ -238,9 +182,6 @@ plot_eat_timeseries <- function(fg, out, outprod, this.nc, this.nc.prod, run){
     for (i in 1:nrow(volumes)) {
       volume_matrix[volumes$z[i], volumes$b[i]] <- volumes$volume[i]
     }
-    
-    # check
-    # check11 <- distributed_eat[[1]][,,4] # volumes matrix and distributed_eat slices have the correct shape
     
     # Iterate through each element in the distributed_eat list
     for (i in 1:length(distributed_eat)) {
@@ -272,12 +213,6 @@ plot_eat_timeseries <- function(fg, out, outprod, this.nc, this.nc.prod, run){
       # Flatten the array into a matrix
       # stack time steps on top of each other
       flattened_matrix <- apply(eat_array,2,c) # rows are rep(1:7, 251)
-      
-      # check
-      # check12 <- eat_array[,,1]
-      # check13 <- eat_array[,,2]
-      # check14 <- eat_array[,,3]
-      # check15 <- head(flattened_matrix, 3*7) # concatenation works ok
       
       # Convert the matrix to a data frame
       temp_df <- as.data.frame(flattened_matrix)
@@ -333,39 +268,45 @@ plot_eat_timeseries <- function(fg, out, outprod, this.nc, this.nc.prod, run){
     return(eat_df_daily)
   }
 }
+```
 
-# make plots with time series of lines by age class, and one with the sum of all age classes
-# plot eat time series
+Apply the function to the groups of interest.
+```{r}
 fg_to_plot <- grps %>% filter(GroupType %in% c("MAMMAL","BIRD","SHARK","FISH")) %>% pull(Name)
 codes_to_plot <- grps %>% filter(GroupType %in% c("MAMMAL","BIRD","SHARK","FISH")) %>% pull(Code)
+
 eat_base <- bind_rows(purrr::map(fg_to_plot, plot_eat_timeseries, 
                                  out = out_base,
                                  outprod = out_base_prod, 
                                  this.nc = this_nc_base,
                                  this.nc.prod = this_nc_base_prod, 
                                  run = 'base'))
+```
 
-# NB: the units are reported as mg N d-1
-# The d-1 seems to mean that they are output one per time step
-# The function Integrate_Diag_Variables() in atbiology.c suggests that diagnostic variables are integrated over a time step (and over the smaller adaptive time steps)
-# if tsz is 12 hours, daily consumption is obtained by multiplying by 2. 
+The units are reported as $mg N d^{-1}$. The d-1 seems to mean that they are output one per time step. The function `Integrate_Diag_Variables()` in `atbiology.c`. If `tsz` is 12 hours, like in our case, daily consumption is obtained by multiplying by 2. 
+```{r}
 eat_base <- eat_base %>%
   mutate(daily_eat_mt = daily_eat_mt * 2)
+```
 
-# plot
-# this out the series to plot it though
+Plot daily consumption over time.
+```{r, fig.width=10, fig.height=18}
+# thin out the series to plot, say to quarterly values
 p <- eat_base %>%
-  filter(ts %in% 30:50) %>%
+  filter(ts %in% seq(30, 50, by = 0.25)) %>%
   ggplot(aes(x = ts, y = daily_eat_mt, color = factor(age)))+
   geom_line()+
   scale_color_viridis_d()+
   theme_bw()+
   labs(x = "Year", y = "Daily consumption (mt)", color = "Age")+
-  facet_wrap(~LongName, scales = "free", nrow = 10)
+  facet_wrap(~LongName, scales = "free", ncol = 4)
 p
 
 ggsave("consumption_from_PROD.png", p, width = 8, height = 16)
+```
 
+Calculate annual consumption, to derive QB values to compare with Aydin et al. (2007).
+```{r}
 # now sum all age classes and get annual consumption
 annual_consumption <- eat_base %>%
   filter(ts > 30) %>% # because consumption for year 30 is not included
@@ -373,7 +314,7 @@ annual_consumption <- eat_base %>%
   group_by(LongName, year) %>%
   summarise(Q = sum(daily_eat_mt))
 
-# get biomass
+# pull in annual biomass
 biomage1 <- biomage %>% 
   pivot_longer(-Time, names_to = 'Code.Age', values_to = 'biomass_mt') %>%
   separate_wider_delim(Code.Age, delim = '.', names = c('Code', 'Age')) %>%
@@ -383,9 +324,10 @@ biomage1 <- biomage %>%
   ungroup() %>%
   left_join(grps %>% dplyr::select(Code, LongName), by = "Code") %>%
   mutate(year = Time / 365)
+```
 
-# join and get QB
-# look at Tier 3 species
+Join consumption and biomass and get QB. Do Tier 3 species first.
+```{r, fig.width=8, fig.height=4}
 qb_t3 <- annual_consumption %>%
   left_join(biomage1, by = c("LongName", "year")) %>%
   filter(Code %in% c("POL","COD","ATF","POP","HAL","FFS","FFD","FHS","REX","SBF","RFS","RFP")) %>%
@@ -395,13 +337,14 @@ qb_t3 %>%
   ggplot(aes(x = year, y = QB, color = LongName))+
   geom_line(linewidth = 1.5)+
   theme_bw()
+```
 
-# The method that apportions the "Eat" tracer to depth layers by fish biomass returns low QB values (0.2-0.7 for Tier 3 stocks)
-# These are all lower than in Aydin et al. (2007), where for most of these stocks it is 2+
-# It is also imprecise
-# It seems like this example from Sarah Gaichas expands the rates to the entire volume of the water column: https://sgaichas.github.io/poseidon-dev/PerCapitaConsumption.html
+The method that apportions the "Eat" tracer to depth layers by fish biomass returns low QB values (0.4-1.4 for Tier 3 stocks). These are all lower than in Aydin et al. (2007), where for most of these stocks it is 2+. It is also imprecise due to the allocation by predator biomass, ignoring prey. 
 
-# Let's plot this for forage fish
+It seems like [this example](https://sgaichas.github.io/poseidon-dev/PerCapitaConsumption.html) from Sarah Gaichas expands the rates to the entire volume of the water column, which may possibly result into an overestimate of total consumption.
+
+Let's plot QB for forage fish.
+```{r, fig.width=8, fig.height=4}
 qb_forage <- annual_consumption %>%
   left_join(biomage1, by = c("LongName", "year")) %>%
   filter(Code %in% c("CAP","SAN","EUL","HER","FOS")) %>%
@@ -411,10 +354,12 @@ qb_forage %>%
   ggplot(aes(x = year, y = QB, color = LongName))+
   geom_line(linewidth = 1.5)+
   theme_bw()
+```
 
-# QB higher than EwE for Capelin, about the same for SAN, lower (1.7-2) for other forage fish
+QB higher than EwE for capelin, about the same for SAN, lower (1.7-2) for other forage fish. As a note, these values are very flat. 
 
-# and top predators
+Now plot top predators.
+```{r, fig.width=8, fig.height=4}
 qb_toppreds <- annual_consumption %>%
   left_join(biomage1, by = c("LongName", "year")) %>%
   filter(Code %in% (grps %>% filter(GroupType %in% c("MAMMAL","BIRD","SHARK")) %>% pull(Code))) %>%
@@ -424,5 +369,8 @@ qb_toppreds %>%
   ggplot(aes(x = year, y = QB, color = LongName))+
   geom_line(linewidth = 1.5)+
   theme_bw()
+```
 
-# low for all, up to 2 orders of magnitude for some of these
+QB is low for all, up to 2 orders of magnitude for some of these. 
+
+The other side of this is what M looks like, but we cannnot tease apart M2 from M with the regular mortality output files and our M would be tainted by mL and mQ for most species (another good reason NOT to use them).
