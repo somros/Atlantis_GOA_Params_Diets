@@ -1,10 +1,9 @@
-# conceptually similar to Javier's code
-# takes PPREY, horizontal dists, vertical dists, gape size from biol.prm, weight at age from init.nc
-# pick a predator
-# identifies 5(?) favorite prey items based on PPREY (and / or true?)
-# returns: by stage: horizontal overlap (map and coefficient), vertical overlap; by age class: gape size limitations (not sure how these work with inverts)
-# produces a figure with all this information for each of them
-# post to slack for all to use
+# Code to explore Atlantis diet interactions from biol.prm and init.nc
+# Conceptually similar to Javier's ReactiveAtlantis code, but more detail
+# For each predator, it takes PPREY matrix and identifies the "favorite" prey items as prescribed in the preferences
+# For each prey items (by ontogenetic stage of the predator), it takes:
+# horizontal dists, vertical dists, gape size from biol.prm, weight at age from init.nc
+# The function returns: by stage: horizontal overlap (map and coefficient), vertical overlap; by age class: gape size limitations
 
 library(tidyverse)
 library(rbgm)
@@ -16,6 +15,7 @@ library(viridis)
 library(ggh4x)
 library(RColorBrewer)
 library(patchwork)
+library(kableExtra)
 
 # Read data ---------------------------------------------------------------
 
@@ -24,13 +24,26 @@ bgm <- read_bgm("../data/GOA_WGS84_V4_final.bgm")
 goa_sf <- box_sf(bgm)
 st_crs(goa_sf) <- st_crs(attr(goa_sf$geometry, "crs")$proj) 
 
-# fg
+# functional groups
 grps <- read.csv("../data/GOA_Groups.csv")
 fg <- grps %>% pull(Code) # groups from group file
 verts <- grps %>% filter(GroupType %in% c("MAMMAL","BIRD","SHARK","FISH")) %>% pull(Code)
 inverts <- setdiff(fg, verts)
 
-# maturity info
+# utility group tables
+vertebrate_groups <- grps %>% filter(GroupType%in%c("FISH","SHARK","BIRD","MAMMAL")) %>% mutate(BiomassType="vertebrate")
+plankton_groups <- grps %>% filter(GroupType %in% c("PWN",'CEP','LG_ZOO','MED_ZOO','SM_ZOO','LG_PHY','SM_PHY')) %>%
+  mutate(BiomassType="plankton")
+bottom_groups <- grps %>% filter(GroupType %in% c("MOB_EP_OTHER",'SED_EP_FF','SED_EP_OTHER','PHYTOBEN')) %>%
+  mutate(BiomassType="2D")
+other_groups <- grps %>% filter(GroupType %in% c("LG_INF","MICROPHTYBENTHOS","SED_BACT","PL_BACT","SM_INF","CARRION","LAB_DET","REF_DET"))%>%
+  mutate(BiomassType="other")
+biomass_groups <- bind_rows(vertebrate_groups,plankton_groups,bottom_groups,other_groups)
+
+# add to grps df
+grps <- grps %>% left_join(biomass_groups)
+
+# age at maturity info
 agemat <- read.table("../data/age_mat.txt")
 agemat <- agemat %>% mutate(species = substr(V1, 1, 3)) %>% rename(agemat = V2) %>% dplyr::select(species, agemat)
 
@@ -42,7 +55,6 @@ init <- tidync(init_file)
 init_nc <- ncdf4::nc_open(init_file)
 
 # Turn PRM and INIT to data frames  ---------------------------------------
-
 # turn pprey matrix to a data frame to work with
 no_age <- c(grps$GroupType[grps$NumStages==1], "DCsed", "DLsed", "DRsed")
 
@@ -87,7 +99,7 @@ pprey_mat <- DM_to_format %>%
 s <- data.frame()
 for(i in 1:length(fg)){
   
-  print(paste("doing", fg[i]))
+  print(paste("doing s for", fg[i]))
   
   this_fg <- fg[i]
   
@@ -138,7 +150,7 @@ for(i in 1:length(fg)){
 v <- data.frame()
 for(i in 1:length(fg)){
   
-  print(paste("doing", fg[i]))
+  print(paste("doing v for", fg[i]))
   
   this_fg <- fg[i]
   
@@ -192,7 +204,7 @@ for(i in 1:length(fg)){
 g <- data.frame()
 for(i in 1:length(fg)){
   
-  print(paste("doing", fg[i]))
+  print(paste("doing g for", fg[i]))
   
   this_fg <- fg[i]
   
@@ -229,27 +241,52 @@ for(i in 1:length(fg)){
   
 }
 
-# this function takes a predator and its favorite 5 prey (per PPREY matrix) and makes some plots:
+# This function takes a predator and its favorite 5 prey by ontogenetic stage (per PPREY matrix) and makes some plots:
 # Horizontal overlap (as the lowest value between s of predator and prey) - how do we handle stages and seasons?
 # vertical overlap
 # gape size overlap by age class (take size of pred, size of prey )
+# the whole concept of favorite prey items needs some thought
+# 
 
 diet_from_init <- function(predator) {
   
-  predator <- "ATF"
+  print(paste("Extracting info for", predator))
+  
+  predator_name <- grps %>% filter(Code == predator) %>% pull(Name) # need this for the netcdf variables
+  
   # pull pprey for this predator
   this_pprey <- pprey_mat %>% 
     filter(Predator == predator) %>% 
     dplyr::select(-label) %>%
     pivot_longer(cols = -c(Predator, PredatorAgeClass, PreyAgeClass), names_to = "Prey", values_to = "pprey") %>%
-    mutate(pprey = as.numeric(pprey)) 
+    mutate(pprey = as.numeric(pprey)) %>%
+    filter(Prey %in% verts)
   
+  # make a plot of the predation according to pprey
+  d_plot <- this_pprey %>%
+    group_by(Predator, PredatorAgeClass, PreyAgeClass) %>%
+    mutate(tot = sum(pprey),
+           prop = pprey / tot) %>%
+    filter(prop > 0) %>%
+    arrange(Predator, PredatorAgeClass, PreyAgeClass, desc(prop)) %>%
+    mutate(cumprop = cumsum(prop)) %>%
+    ungroup() %>%
+    filter(cumprop < .9) %>%
+    ggplot()+
+    geom_bar(aes(x = PreyAgeClass, y = prop, fill = Prey), stat = "identity")+
+    theme_bw()+
+    labs(x="",y="prop from PPREY",title = paste0(predator, "'s PPREY preferences (proportional)"))+
+    facet_grid(~PredatorAgeClass)
+  
+  d_file <- paste("diets_from_init", predator, "d.png", sep="/")
+
+  ##########################################################################################
+  # HORIZONTAL OVERLAP
   # pull horizontal distributions
   # of the predator
   s_pred <- s %>% filter(species == predator)
   
   # need to do this starting from predator life stage
-  # for example, ATF juveniles do not eat adult pollock, so their distributions are irrelevant
   pred_stages <- s_pred %>% pull(stage) %>% unique()
   s_overlap <- data.frame()
   for(i in 1:length(pred_stages)){
@@ -258,9 +295,13 @@ diet_from_init <- function(predator) {
       filter(PredatorAgeClass == pred_stages[i]) %>%
       group_by(Predator, PredatorAgeClass, PreyAgeClass) %>%
       arrange(desc(pprey)) %>%
-      slice_head(n = 5)
+      filter(pprey > 0) %>%
+      slice_head(n = 5) %>%
+      ungroup()
     
     fav_prey <- fav_prey_df %>% pull(Prey) %>% unique()
+    
+    if(length(fav_prey)==0) {next}
     
     # pull dists of the favorite prey for this life stage of the predator
     s_prey <- s %>% filter(species %in% fav_prey)
@@ -300,6 +341,9 @@ diet_from_init <- function(predator) {
     
   }
   
+  # if at this stage s_overlap has no rows it means that this group eats no vertebrate prey and we should break the function
+  if(nrow(s_overlap)==0){stop("This group eats no predators")}
+  
   # drop na's and adjust the stages for facetting
   s_overlap <- s_overlap %>%
     drop_na(prey) %>%
@@ -332,11 +376,14 @@ diet_from_init <- function(predator) {
     }
   }
   
+  s_length <- length(p)
+  
   s_plot <- wrap_plots(p, ncol = 4) # 4 columns arrange the plots by seasons
   
-  ggsave("t.png", s_plot, width = 30, height = 40) # lots of room for improvement...
+  s_file <- paste("diets_from_init", predator, "s.png", sep="/")
   
-  
+  ##########################################################################################
+  # VERTICAL OVERLAP
   # pull vertical distributions
   # of the predator
   v_pred <- v %>% filter(species == predator)
@@ -347,9 +394,13 @@ diet_from_init <- function(predator) {
       filter(PredatorAgeClass == pred_stages[i]) %>%
       group_by(Predator, PredatorAgeClass, PreyAgeClass) %>%
       arrange(desc(pprey)) %>%
-      slice_head(n = 5)
+      filter(pprey > 0) %>%
+      slice_head(n = 5) %>%
+      ungroup()
     
     fav_prey <- fav_prey_df %>% pull(Prey) %>% unique()
+    
+    if(length(fav_prey)==0) {next}
     
     # pull vertical dists of the favorite prey for this life stage of the predator
     v_prey <- v %>% filter(species %in% fav_prey)
@@ -412,25 +463,231 @@ diet_from_init <- function(predator) {
   
   v_plot <- wrap_plots(p, ncol = 2) # 4 columns arrange the plots by seasons
   
-  ggsave("v.png", v_plot, width = 10, height = 12) # lots of room for improvement...
+  v_file <- paste("diets_from_init", predator, "v.png", sep="/")
   
-  
+  ##########################################################################################
+  # GAPE SIZE OVERLAP
   # pull gape size information of the predator
+  g_pred <- g %>% filter(species == predator)
   
   # pull weight-at-age information from initial conditions
   # of the predator
+  fg_atts <- grps %>% filter(Code==predator)
   
-  # of the favorite prey 
+  if(fg_atts$BiomassType!="vertebrate") stop("weight at age only for vertebrates.")
   
-  # calculate, per predator age class, min and max allowed bite size
+  #Extract from the init.nc file the appropriate reserve N time series variables
+  resN_vars <- hyper_vars(init) %>% # all variables in the .nc file active grid
+    filter(grepl("_ResN",name)) %>% # filter for reserve N
+    filter(grepl(predator_name,name)) # filter for specific functional group
   
-  # for each pred age class, write out which prey age classes are allowed
+  #Extract from the output .nc file the appropriate structural N time series variables
+  strucN_vars <- hyper_vars(init) %>% # all variables in the .nc file active grid
+    filter(grepl("_StructN",name)) %>% # filter for structural N
+    filter(grepl(predator_name,name)) # filter for specific functional group
   
-  # arrange plots
+  # function that pulls the fillvalue
+  get_nc_fillval <- function(varid) {
+    fillval <- ncdf4::ncatt_get(nc = init_nc, varid = varid, attname = "fill.value")
+    fillval_df <- data.frame(varid, fillval[2])
+    fillval_df$species <- gsub("[0-9]", "",gsub("_StructN","",gsub("_ResN","",fillval_df$varid)))
+    fillval_df$age <- as.numeric(gsub("[^0-9]", "",fillval_df$varid))
+    #fillval_df$var <- sub(".*[0-9]_(.*)", "\\1", fillval_df$varid)
+    fillval_df <- fillval_df %>% dplyr::select(species, age, value)
+    return(fillval_df)
+  }
   
-  # output plot panels
+  # Use pmap with only the variable names
+  resN <- purrr::map(resN_vars$name, get_nc_fillval) %>% bind_rows()
+  strucN <- purrr::map(strucN_vars$name, get_nc_fillval) %>% bind_rows()
+  
+  # combine, get total mgN, and convert to g 
+  weight <- resN %>% 
+    left_join(strucN, by = c("species","age")) %>% 
+    mutate(totN = value.x+value.y,
+           weight_g = totN * 20 * 5.7 / 1000) %>%
+    dplyr::select(species,age,weight_g)
+  
+  # add upper and lower limit from gape size
+  weight <- weight %>%
+    mutate(low = weight_g * (g_pred %>% filter(limit == "low") %>% pull(g)),
+           high = weight_g * (g_pred %>% filter(limit == "high") %>% pull(g)))
+  
+  # add stage and species code
+  pred_weight <- weight %>%
+    left_join(grps %>% dplyr::select(Code, Name), by = c("species"="Name")) %>%
+    left_join(agemat, by = c("Code"="species")) %>%
+    mutate(age = age -1,
+           stage = ifelse(age < agemat, "juvenile", "adult")) %>%
+    dplyr::select(species, stage, age, low, high)
+  
+  # now for the prey species, but by predator stage?
+  eaten <- data.frame()
+  for(i in 1:length(pred_stages)){
+    
+    fav_prey_df <- this_pprey %>%
+      filter(PredatorAgeClass == pred_stages[i]) %>%
+      group_by(Predator, PredatorAgeClass, PreyAgeClass) %>%
+      arrange(desc(pprey)) %>%
+      filter(pprey > 0) %>%
+      slice_head(n = 5) %>%
+      ungroup()
+    
+    fav_prey <- fav_prey_df %>% dplyr::select(Prey) %>% distinct()
+    
+    if(length(fav_prey)==0) {next}
+    
+    prey_names <- fav_prey %>% 
+      left_join(grps %>% dplyr::select(Code, Name), by = c("Prey"="Code")) %>% 
+      pull(Name)
+    
+    pattern <- paste(prey_names, collapse = "|") # Create a single pattern string
+    
+    resN_vars <- hyper_vars(init) %>% # all variables in the .nc file active grid
+      filter(grepl("_ResN",name)) %>% # filter for reserve N
+      filter(grepl(pattern,name)) # filter for specific functional group
+    
+    strucN_vars <- hyper_vars(init) %>% # all variables in the .nc file active grid
+      filter(grepl("_StructN",name)) %>% # filter for structural N
+      filter(grepl(pattern,name)) # filter for specific functional group
+    
+    # Use pmap with only the variable names
+    resN <- purrr::map(resN_vars$name, get_nc_fillval) %>% bind_rows()
+    strucN <- purrr::map(strucN_vars$name, get_nc_fillval) %>% bind_rows()
+    
+    # combine, get total mgN, and convert to g 
+    weight <- resN %>% 
+      left_join(strucN, by = c("species","age")) %>% 
+      mutate(totN = value.x+value.y,
+             weight_g = totN * 20 * 5.7 / 1000) %>%
+      dplyr::select(species,age,weight_g)
+    
+    # add stage and species code
+    weight <- weight %>%
+      left_join(grps %>% dplyr::select(Code, Name), by = c("species"="Name")) %>%
+      left_join(agemat, by = c("Code"="species")) %>%
+      mutate(age = age -1,
+             stage = ifelse(age < agemat, "juvenile", "adult")) %>%
+      dplyr::select(species, stage, age, weight_g)
+    
+    # get age classes for this stage of the predator
+    pred_weight_tmp <- pred_weight %>%
+      filter(stage == pred_stages[i])
+    
+    pred_ages <- pred_weight_tmp %>% pull(age)
+    
+    # we need to do this by prey life stage or else they'll show in the table
+    # do it by prey
+    # and by life stage of the prey as informed in fav_prey_df
+    for(j in 1:nrow(fav_prey)){
+      
+      this_prey <- fav_prey[j,1] %>% pull()
+      
+      # identify stages of the prey for this predator stage
+      prey_stages <- fav_prey_df %>% filter(Prey == this_prey) %>% pull(PreyAgeClass)
+      
+      for(k in 1:length(prey_stages)){
+        
+        prey_weight_tmp <- weight %>%
+          filter(species == prey_names[j], stage == prey_stages[k])
+        
+        # loop over predator's age classes
+        
+        for(l in 1:length(pred_ages)){
+          
+          lo <- pred_weight_tmp[l,]$low
+          hi <- pred_weight_tmp[l,]$high
+          
+          ages_eaten <- prey_weight_tmp %>%
+            mutate(eaten = ifelse(between(weight_g, lo, hi), 1, 0)) %>%
+            filter(eaten > 0) %>%
+            pull(age)
+          
+
+          eaten_tmp <- tibble(predator,
+                              "stage" = pred_stages[i],
+                              "age" = pred_ages[l],
+                              "prey" = fav_prey[j,1] %>% pull(Prey),
+                              "eaten_prey_ages" = list(ages_eaten))
+          
+          eaten <- rbind(eaten, eaten_tmp)
+          
+        }
+        
+        
+      }
+      
+      
+    }
+    
+  }
+  
+  eaten <- eaten %>% group_by(predator,stage,age,prey) %>%
+    summarize(eaten_prey_ages = list(sort(unlist(eaten_prey_ages))))
+  
+  # rearrange and write out a table
+  eaten_wide <- eaten %>%
+    pivot_wider(id_cols = c(predator,stage,age), names_from = prey, values_from = eaten_prey_ages)
+  
+  # Function to replace numeric(0) with NA
+  replace_numeric0_with_NA <- function(x) {
+    if(is.list(x)) {
+      lapply(x, function(y) if(length(y) == 0) "" else y)
+    } else {
+      x
+    }
+  }
+  
+  # Apply this function to each column of the data frame
+  eaten_wide[] <- lapply(eaten_wide, replace_numeric0_with_NA)
+  
+  # sort
+  eaten_wide <- eaten_wide %>% arrange(age)
+  
+  # Create a kable table
+  gape_kable <- eaten_wide %>%
+    knitr::kable(format = "markdown", booktabs = TRUE) 
+  
+  # Save the table as PDF
+  # Using R Markdown
+  # For this, you'll need to put your table creation code in an R Markdown document
+  # and then knit the document to PDF.
+  
+  yaml_header <- paste0(
+    "---\n",
+    "title: '", predator, "s favorite prey items (with age class)'\n",
+    "output: \n",
+    "  pdf_document:\n",
+    "    latex_engine: xelatex\n",
+    "header-includes:\n",
+    "  - '\\usepackage{graphicx}'\n",
+    "  - '\\usepackage{grffile}'\n",
+    "  - '\\tiny' # Set the font size\n",
+    "geometry: landscape\n",
+    "---\n"
+  )
+  
+  g_file <- paste("diets_from_init", predator, "g.Rmd", sep="/")
+  
+  ##########################################################################################
+  # write everything out
+  # make a folder
+  dir.create(paste("diets_from_init", predator, sep="/"), recursive = T)
+  
+  # diet preferences
+  ggsave(d_file, d_plot, width = 8, height = 7)
+  
+  # horizontal distributions
+  ggsave(s_file, s_plot, width = 25, height = s_length)
+  
+  # vertical distributions
+  ggsave(v_file, v_plot, width = 10, height = 12)
+  
+  # gape-based interactions
+  cat(yaml_header, gape_kable, sep="\n", file=g_file)
+  rmarkdown::render(g_file, output_format = "pdf_document")
+  
 }
 
-
-
-
+# apply function
+purrr::map(verts, possibly(diet_from_init,NA))
