@@ -17,6 +17,11 @@ library(RColorBrewer)
 library(patchwork)
 library(kableExtra)
 
+
+# Select run --------------------------------------------------------------
+
+this_run <- 1401
+
 # Read data ---------------------------------------------------------------
 
 # geometry
@@ -48,7 +53,7 @@ agemat <- read.table("../data/age_mat.txt")
 agemat <- agemat %>% mutate(species = substr(V1, 1, 3)) %>% rename(agemat = V2) %>% dplyr::select(species, agemat)
 
 # prm of run to look at
-bio_prm <- readLines("../../output_files/data/out_1328/GOAbioparam_test.prm")
+bio_prm <- readLines(paste0("../../output_files/data/out_", this_run, "/GOAbioparam_test.prm"))
 # init.nc of run to look at
 init_file <- "../../../AtlantisGOA_Base/GOA_cb_summer.nc"
 init <- tidync(init_file)
@@ -64,12 +69,17 @@ pprey_ind <- which(startsWith(x=bio_prm, "pPREY")==T)
 diets_end <- max(pprey_ind)+2
 DM_prm <- bio_prm[seq(diets_start,diets_end)]
 names_pprey <- bio_prm[pprey_ind]
-val_pprey <- bio_prm[pprey_ind+1]
+if(bio_prm[diets_start+1] == "") { # sometimes there is a blank line between the name and the string of values
+  val_pprey <- bio_prm[pprey_ind+2]
+} else {
+  val_pprey <- bio_prm[pprey_ind+1]
+}
 
 DM_to_format <- t(
   sapply(seq(1, length(val_pprey)),
          function(x){
            vec <- unlist(strsplit(val_pprey[x], " "))
+           vec <- vec[vec != ""] # drop trailing empty spaces if there are any
            return(vec)
          })
 )
@@ -263,23 +273,28 @@ diet_from_init <- function(predator) {
     filter(Prey %in% verts)
   
   # make a plot of the predation according to pprey
-  d_plot <- this_pprey %>%
+  d_df <- this_pprey %>%
     group_by(Predator, PredatorAgeClass, PreyAgeClass) %>%
     mutate(tot = sum(pprey),
            prop = pprey / tot) %>%
     filter(prop > 0) %>%
     arrange(Predator, PredatorAgeClass, PreyAgeClass, desc(prop)) %>%
     mutate(cumprop = cumsum(prop)) %>%
-    ungroup() %>%
-    filter(cumprop < .9) %>%
+    ungroup()
+  
+  if(min(d_df$cumprop)<.9){
+    d_df <- d_df %>% filter(cumprop < .9)
+  }
+  
+  d_plot <- d_df %>%
     ggplot()+
     geom_bar(aes(x = PreyAgeClass, y = prop, fill = Prey), stat = "identity")+
     theme_bw()+
     labs(x="",y="prop from PPREY",title = paste0(predator, "'s PPREY preferences (proportional)"))+
     facet_grid(~PredatorAgeClass)
   
-  d_file <- paste("diets_from_init", predator, "d.png", sep="/")
-
+  d_file <- paste("diets_from_init", this_run, predator, "d.png", sep="/")
+  
   ##########################################################################################
   # HORIZONTAL OVERLAP
   # pull horizontal distributions
@@ -380,7 +395,7 @@ diet_from_init <- function(predator) {
   
   s_plot <- wrap_plots(p, ncol = 4) # 4 columns arrange the plots by seasons
   
-  s_file <- paste("diets_from_init", predator, "s.png", sep="/")
+  s_file <- paste("diets_from_init", this_run, predator, "s.png", sep="/")
   
   ##########################################################################################
   # VERTICAL OVERLAP
@@ -463,7 +478,7 @@ diet_from_init <- function(predator) {
   
   v_plot <- wrap_plots(p, ncol = 2) # 4 columns arrange the plots by seasons
   
-  v_file <- paste("diets_from_init", predator, "v.png", sep="/")
+  v_file <- paste("diets_from_init", this_run, predator, "v.png", sep="/")
   
   ##########################################################################################
   # GAPE SIZE OVERLAP
@@ -603,7 +618,7 @@ diet_from_init <- function(predator) {
             filter(eaten > 0) %>%
             pull(age)
           
-
+          
           eaten_tmp <- tibble(predator,
                               "stage" = pred_stages[i],
                               "age" = pred_ages[l],
@@ -667,12 +682,12 @@ diet_from_init <- function(predator) {
     "---\n"
   )
   
-  g_file <- paste("diets_from_init", predator, "g.Rmd", sep="/")
+  g_file <- paste("diets_from_init", this_run, predator, "g.Rmd", sep="/")
   
   ##########################################################################################
   # write everything out
   # make a folder
-  dir.create(paste("diets_from_init", predator, sep="/"), recursive = T)
+  dir.create(paste("diets_from_init", this_run, predator, sep="/"), recursive = T)
   
   # diet preferences
   ggsave(d_file, d_plot, width = 8, height = 7)
@@ -690,4 +705,4 @@ diet_from_init <- function(predator) {
 }
 
 # apply function
-purrr::map(verts, possibly(diet_from_init,NA))
+# purrr::map(verts, possibly(diet_from_init,NA))
