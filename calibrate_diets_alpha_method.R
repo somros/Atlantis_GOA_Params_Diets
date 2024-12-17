@@ -8,13 +8,13 @@ library(tidyverse)
 ## Starting from version with amplified consumption, run 1689
 ## Here we use as target (i.e., "true" diets) the original, pre-calibration PRM file
 
-source("diet_calibration_functions.R")
+source("diet_calibration_functions_V2.R")
 
 # which runs are we working on?
 runs_folder <- "C:/Users/Alberto Rovellini/Documents/GOA/Parametrization/output_files/data/"
 run_to_calibrate <- 1689
 
-my_alpha <- 0.25
+my_alpha <- 0.75
 
 # which groups?
 FG_tab_Atl <- read.csv("../data/GOA_Groups.csv")
