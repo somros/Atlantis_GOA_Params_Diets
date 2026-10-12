@@ -12,13 +12,15 @@ library(tidyr)
 library(tibble)
 library(reshape2)
 library(here)
+library(viridis)
 
 #############################################
 # Based on code from PY Hernvann
 ## Starting from version with amplified consumption, run 1401
 ## Here we use as target (i.e., "true" diets) the original, pre-calibration PRM file
 
-repAtlmat <- "../../build_init_prm_10COHORTS/data/GOAbioparam_test.prm" #true diets
+# repAtlmat <- "../../build_init_prm_10COHORTS/data/GOAbioparam_test.prm" #true diets
+repAtlmat <- "../../output_files/data/out_2393/GOAbioparam_updated.prm"
 #setwd("/home/atlantis/calcurrenttestruns/calcurrenttestrunssr04/calcurrenttestruns/AtlantisCalCurrV4_S4_0124/outputFolder")
 FG_tab_Atl <- read.csv("../data/GOA_Groups.csv")
 
@@ -73,17 +75,17 @@ formatted_DM_original <- DM_to_format %>%
 # These are not necessarily proportional diets
 formatted_DM_original_long <- formatted_DM_original %>%
   pivot_longer(5:ncol(formatted_DM_original), values_to="diet_init", names_to="Prey") %>%
-  group_by(PredatorCODE, PredatorAgeClass, Prey) %>%
+  group_by(label, PredatorCODE, PredatorAgeClass, Prey, PreyAgeClass) %>%
   mutate(diet_init= as.numeric(diet_init)) %>%
   summarize(diet_init=mean(diet_init, na.rm=T))%>%
   ungroup()
 
-# These should add up to 0.1 (or close) for each "row"
-formatted_DM_original_long %>%
-  group_by(PredatorCODE, PredatorAgeClass) %>%
-  summarize(check = sum(diet_init)) %>%
-  pull(check) %>%
-  hist()
+# These should add up to 0.1 (or close) for each "row" if you use a pre-calibration pprey matrix
+# formatted_DM_original_long %>%
+#   group_by(PredatorCODE, PredatorAgeClass) %>%
+#   summarize(check = sum(diet_init)) %>%
+#   pull(check) %>%
+#   hist()
 
 #################################################################
 #### Calibrate top predators and groundfish in the GOA model
@@ -93,15 +95,16 @@ formatted_DM_original_long %>%
 ## Starting from version with amplified consumption, run 1689
 
 # model output (the latest that we want to fix)
-pred_diets <- read.table("C:/Users/Alberto Rovellini/Documents/GOA/Parametrization/output_files/data/out_1689/outputGOA01689_testDietCheck.txt", header=T)
+pred_diets <- read.table("C:/Users/Alberto Rovellini/Documents/GOA/Parametrization/output_files/data/out_2393/outputGOA02393_testDietCheck.txt", header=T)
 # read in age at maturity - mind that this is not likely to align with the age at which the ontogenetic shift in diets occurs
 age_mat <- read.table("../data/age_mat.txt", sep = ' ') %>%
   select(V1, V4) %>%
   purrr::set_names(c('Code','age')) %>%
   mutate(Code = gsub('_age_mat','',Code))
 
-formatted_DM_pred_long <- pred_diets %>%
-  filter(Time==365) %>% # can consider using later time steps
+# problems with salmon...
+pred_diets %>% filter(Predator == "SSO") %>%
+  filter(Time==(73*3)) %>% # can consider using later time steps
   pivot_longer(6:ncol(pred_diets), values_to="diet_prop", names_to="Prey") %>%
   left_join(age_mat, by = c('Predator'='Code')) %>%
   mutate(PredatorAgeClass=ifelse(!Predator %in% no_age,
@@ -112,8 +115,63 @@ formatted_DM_pred_long <- pred_diets %>%
   mutate(diet_prop_tot=sum(diet_prop_est, na.rm=T)) %>% 
   mutate(diet_prop_est=diet_prop_est/diet_prop_tot) %>% # rescales the contributions by the total, to make sure there are proportional (do we want this though?)
   ungroup() %>%
-  dplyr::select(-diet_prop_tot, -Time) #%>%
+  dplyr::select(-diet_prop_tot, -Time) %>%
+  filter(PredatorAgeClass == "Juvenile")
+
+# 10/05/2026 calibrating salmon diets for GOACLIM 2
+# the dietcheck.txt file has time steps consistent with the biomass txt file
+# problem: if something is outside the model domain at the time the output is written, it is 0
+# for salmon, which migrates, we need to find when it's inside the model
+# note that juveniles and adults will have different timing
+salmon_schedule <- data.frame(Code = c("SCH", "SCO", "SCM", "SPI","SSO"),
+                              ts = c(3, 5, 3, 3, 3))
+
+# for salmon / migratory species the seasonal window has to change
+
+tmp <- list()
+for(i in 1:length(salmon_schedule$Code)){
+  this_code <- salmon_schedule$Code[i]
+  
+  ts <- salmon_schedule %>% filter(Code == this_code) %>% pull(ts)*73
+  
+  tmp_df <- pred_diets %>%
+    filter(Predator == this_code) %>%
+    filter(Time==ts + (365*(5-1))) %>% # 5-1 means in the 5th year
+    pivot_longer(6:ncol(pred_diets), values_to="diet_prop", names_to="Prey") %>%
+    left_join(age_mat, by = c('Predator'='Code')) %>%
+    mutate(PredatorAgeClass=ifelse(!Predator %in% no_age,
+                                   ifelse(Cohort < age, "Juvenile", "Adult"), "Adult")) %>% 
+    group_by(Time, Predator, Prey, PredatorAgeClass) %>% 
+    summarize(diet_prop_est=sum(diet_prop, na.rm=T)) %>% # summing contributions to cohorts into life stages
+    group_by(Time, Predator, PredatorAgeClass) %>%
+    mutate(diet_prop_tot=sum(diet_prop_est, na.rm=T)) %>% 
+    mutate(diet_prop_est=diet_prop_est/diet_prop_tot) %>% # rescales the contributions by the total, to make sure there are proportional (do we want this though?)
+    ungroup() %>%
+    dplyr::select(-diet_prop_tot, -Time) #%>%
   #drop_na() # CAREFUL: dropping all biomass pools
+  
+  tmp[[i]] <- tmp_df
+  
+}
+
+formatted_DM_pred_long <- bind_rows(tmp) # this should capture species of interest in the 5th year, each at their own time step
+
+# formatted_DM_pred_long <- pred_diets %>%
+#   filter(Time==ts*10) %>% # can consider using later time steps
+#   pivot_longer(6:ncol(pred_diets), values_to="diet_prop", names_to="Prey") %>%
+#   left_join(age_mat, by = c('Predator'='Code')) %>%
+#   mutate(PredatorAgeClass=ifelse(!Predator %in% no_age,
+#                                  ifelse(Cohort < age, "Juvenile", "Adult"), "Adult")) %>% 
+#   group_by(Time, Predator, Prey, PredatorAgeClass) %>% 
+#   summarize(diet_prop_est=sum(diet_prop, na.rm=T)) %>% # summing contributions to cohorts into life stages
+#   group_by(Time, Predator, PredatorAgeClass) %>%
+#   mutate(diet_prop_tot=sum(diet_prop_est, na.rm=T)) %>% 
+#   mutate(diet_prop_est=diet_prop_est/diet_prop_tot) %>% # rescales the contributions by the total, to make sure there are proportional (do we want this though?)
+#   ungroup() %>%
+#   dplyr::select(-diet_prop_tot, -Time) #%>%
+#   #drop_na() # CAREFUL: dropping all biomass pools
+
+# TODO: problem: this renormalizes to 1, I do not think we want it that way? Or OK for prop computing?
 
 # # write out matrices for Claude
 # write.table(formatted_DM_original_long %>%
@@ -144,8 +202,22 @@ tt <- formatted_DM_pred_long %>%
   group_by(Predator, PredatorAgeClass) %>%
   summarise(check  = sum(diet_prop_est))
 
+
+# now package it for the groups of interest.
+# some examples:
+top_preds <- FG_tab_Atl %>%
+  filter(GroupType %in% c("MAMMAL","BIRD","SHARK")) %>%
+  pull(Code)
+tier3 <- c("ATF","COD","POL","ATF","POP","SBF","FFS","FFD","RFS","HAL","REX","FHS")
+forage <- c("HER","EUL","CAP","SAN","FOL")
+salmon <- c("SCH", "SCO", "SCM", "SPI", "SSO")
+
+# todo <- tier3
+todo <- salmon
+
 # calculate correction factors
 corr_diet <- formatted_DM_original_long %>% # takes original diets (i.e., true diets we aim for)
+  filter(PredatorCODE %in% todo) %>%
   group_by(label, PredatorCODE, PredatorAgeClass) %>% # keeping the label is what keeps the prey stage
   mutate(sum_diet=sum(diet_init, na.rm=T)) %>% # sum of original diets, adds up to close to 0.1 for us
   ungroup() %>%
@@ -163,18 +235,7 @@ corr_diet <- formatted_DM_original_long %>% # takes original diets (i.e., true d
 # this step returned a set of multipliers for each entry of the PPREY matrix
 # Now these must be applied to the most recent PPREY matrix to make it match the intended diets
 
-# now package it for the groups of interest.
-# some examples:
-top_preds <- FG_tab_Atl %>%
-  filter(GroupType %in% c("MAMMAL","BIRD","SHARK")) %>%
-  pull(Code)
-tier3 <- c("ATF","COD","POL","ATF","POP","SBF","FFS","FFD","RFS","HAL","REX","FHS")
-forage <- c("HER","EUL","CAP","SAN","FOL")
-
-todo <- tier3
-
 prio_corr <- corr_diet %>%
-  filter(PredatorCODE %in% todo) %>%
   filter(ratio_diet!=0) %>% # we do not want 0's?
   #filter(ratio_diet!=1) %>% # this is like doing nothing (i.e., original and predicted match)
   group_by(label, PredatorCODE, PredatorAgeClass, Prey) %>%
@@ -231,8 +292,8 @@ prio_corr <- prio_corr %>%
 change_diet <- prio_corr
 
 # read in new diet matrix (make this a function as it is the same workflow used above)
-run <- 1689
-latestAtlmat <- paste0("../../output_files/data/out_",run,"/GOAbioparam_test.prm") #PRM with recent diets to calibrate
+run <- 2393
+latestAtlmat <- paste0("../../output_files/data/out_",run,"/GOAbioparam_updated.prm") #PRM with recent diets to calibrate
 bio_prm_latest <- readLines(latestAtlmat)
 
 # identify and index the PPREY matrix from the PRM file
@@ -335,7 +396,7 @@ newpprey <- calc_new_pprey  %>%
   dplyr::select(label,all_of(for_order_FG),DCsed,DLsed,DRsed)
 
 # pull the modified groups from here
-pprey_file <- paste0('calibrated_',run,todo,'.txt')
+pprey_file <- paste0('calibrated_',run,'.txt')
 file.create(pprey_file)
 
 for(i in 1:length(names_pprey)){
@@ -345,12 +406,12 @@ for(i in 1:length(names_pprey)){
   
   if(this_label %in% unique(newpprey$label)){
     
-    cat(this_pprey_name, file=pprey_file, append=TRUE,'\n\n')
+    cat(this_pprey_name, file=pprey_file, append=TRUE,'\n')
     cat(unlist(newpprey %>% filter(label == this_label) %>% select(-label)), file=pprey_file, append=TRUE, '\n')
     
   } else {
     
-    cat(this_pprey_name, file=pprey_file, append=TRUE,'\n\n')
+    cat(this_pprey_name, file=pprey_file, append=TRUE,'\n')
     cat(val_pprey[i], file=pprey_file, append=TRUE, '\n')
     
   }
